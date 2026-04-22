@@ -48,6 +48,7 @@ def empty_challan() -> Dict[str, Any]:
         "agent": "",
         "gstin_no": "",
         "gstin_numbers": [],
+        "pan_no": "",
         "group": "",
         "marka_help": "",
         "lot_no": "",
@@ -172,6 +173,11 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
     c['gstin_numbers'] = all_gstins
     c['gstin_no'] = all_gstins[0] if all_gstins else ""
 
+    # PAN No (format: 5 letters + 4 digits + 1 letter = 10 chars)
+    pan_m = re.search(r'PAN\s*NO[:\s]+([A-Z]{5}[0-9]{4}[A-Z])', decoded, re.IGNORECASE)
+    if pan_m:
+        c['pan_no'] = pan_m.group(1).upper()
+
     # Challan number
     ch_m = re.search(r'CHALLAN\s+NO[.:\s]+(\d+)', decoded, re.IGNORECASE)
     if ch_m:
@@ -277,6 +283,11 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
     all_gstins = extract_all_gstins(text)
     c['gstin_numbers'] = all_gstins
     c['gstin_no'] = all_gstins[0] if all_gstins else ""
+
+    # PAN No
+    pan_m = re.search(r'PAN\s*NO[:\s]+([A-Z]{5}[0-9]{4}[A-Z])', text, re.IGNORECASE)
+    if pan_m:
+        c['pan_no'] = pan_m.group(1).upper()
 
     # Challan No
     ch_m = re.search(r'Challan\s+No[.:\s]+(\d+)', text, re.IGNORECASE)
