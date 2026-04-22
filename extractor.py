@@ -21,6 +21,20 @@ def to_float(s: str) -> float:
         return 0.0
 
 
+def extract_all_gstins(text: str) -> List[str]:
+    """Extract all unique GSTIN numbers from text (handles special PDF chars)."""
+    seen = set()
+    result = []
+    for raw in re.findall(r'GSTIN[:\s\-]+(\S{14,16})', text, re.IGNORECASE):
+        cleaned = re.sub(r'[^A-Z0-9]', '', raw.upper())
+        # Valid GSTIN: 13-15 alphanumeric chars starting with 2 digit state code
+        if 13 <= len(cleaned) <= 15 and re.match(r'^\d{2}', cleaned):
+            if cleaned not in seen:
+                seen.add(cleaned)
+                result.append(cleaned)
+    return result
+
+
 def empty_challan() -> Dict[str, Any]:
     return {
         "date": "",
@@ -33,6 +47,7 @@ def empty_challan() -> Dict[str, Any]:
         "master_ac": "",
         "agent": "",
         "gstin_no": "",
+        "gstin_numbers": [],
         "group": "",
         "marka_help": "",
         "lot_no": "",
@@ -152,10 +167,10 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
     if len(lines) >= 3 and not lines[2].strip().upper().startswith('GSTIN'):
         c['party_address'] = lines[2].strip()
 
-    # Supplier GSTIN (first occurrence)
-    gstin_m = re.search(r'GSTIN[:\s]+([A-Z0-9]{15})', decoded)
-    if gstin_m:
-        c['gstin_no'] = gstin_m.group(1)
+    # All GSTINs — search decoded text (handles quadrupled encoding) + raw (catches plain ones)
+    all_gstins = extract_all_gstins(decoded) or extract_all_gstins(raw_text)
+    c['gstin_numbers'] = all_gstins
+    c['gstin_no'] = all_gstins[0] if all_gstins else ""
 
     # Challan number
     ch_m = re.search(r'CHALLAN\s+NO[.:\s]+(\d+)', decoded, re.IGNORECASE)
@@ -258,10 +273,10 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
         addr_parts.append(stripped)
     c['party_address'] = ' '.join(addr_parts)
 
-    # Supplier GSTIN
-    gstin_m = re.search(r'GSTIN\s*[:\-]+\s*([A-Z0-9]{15})', text)
-    if gstin_m:
-        c['gstin_no'] = gstin_m.group(1)
+    # All GSTINs
+    all_gstins = extract_all_gstins(text)
+    c['gstin_numbers'] = all_gstins
+    c['gstin_no'] = all_gstins[0] if all_gstins else ""
 
     # Challan No
     ch_m = re.search(r'Challan\s+No[.:\s]+(\d+)', text, re.IGNORECASE)
