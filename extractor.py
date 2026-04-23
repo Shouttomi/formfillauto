@@ -21,6 +21,21 @@ def to_float(s: str) -> float:
         return 0.0
 
 
+def extract_hsn(text: str) -> str:
+    """Extract HSN/SAC code — handles all known PDF variants."""
+    patterns = [
+        r'HSN\s*/\s*SAC\s*[:\s]+(\d+)',   # HSN / SAC :5407
+        r'HSN\s+ACS?\s*[:\s]+(\d+)',        # HSN ACS : 540710
+        r'HSN\s+CODE\s*[:\s]+(\d+)',        # HSN CODE 5407
+        r'\bHSN\s*[:\s]+(\d+)',             # HSN : 5407
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def extract_all_gstins(text: str) -> List[str]:
     """Extract all unique GSTIN numbers from text (handles special PDF chars)."""
     seen = set()
@@ -67,6 +82,9 @@ def empty_challan() -> Dict[str, Any]:
         "width": 0.0,
         "transpoter": "",
         "remark": "",
+        "weaver": "",
+        "item": "",
+        "pu_bill_no": "",
         "table": []
     }
 
@@ -114,7 +132,7 @@ def parse_table_format_a(raw_text: str) -> List[Dict]:
                     pass
 
     return [
-        {"tn": k, "meter": v, "finish_mtr": 0.0, "shortage_mtr": 0.0, "ba_mtr": 0.0}
+        {"tn": k, "meter": v}
         for k, v in sorted(table_rows.items())
     ]
 
@@ -147,7 +165,7 @@ def parse_table_format_b(text: str) -> List[Dict]:
                 pass
 
     return [
-        {"tn": k, "meter": v, "finish_mtr": 0.0, "shortage_mtr": 0.0, "ba_mtr": 0.0}
+        {"tn": k, "meter": v}
         for k, v in sorted(table_rows.items())
     ]
 
@@ -197,10 +215,7 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
     if q_m:
         c['quality'] = q_m.group(1).strip().strip('*').strip()
 
-    # HSN
-    hsn_m = re.search(r'HSN\s*/?\s*SAC\s*[:\s]+(\d+)', decoded, re.IGNORECASE)
-    if hsn_m:
-        c['hsn_code'] = hsn_m.group(1)
+    c['hsn_code'] = extract_hsn(decoded)
 
     # Marka (e.g. LF-VRUNDAVAN appears as a standalone line before TOTALS)
     mk_m = re.search(r'\n([A-Z]{2,6}-[A-Z]+)\s*\n', decoded)
@@ -236,7 +251,7 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
         lr_val = lr_m.group(1).strip().strip('-').strip()
         c['lr_no'] = lr_val
 
-    # Sub-party, bill no, pur no → remark
+    # Sub-party, bill no, pur no → remark (format A specific)
     remark_parts = []
     sp_m = re.search(r'PARTY\s*[:\s]+([A-Z][A-Z\s]+?)(?:\s+PUR|\s*$)', decoded, re.IGNORECASE | re.MULTILINE)
     bl_m = re.search(r'BILL\s+NO[:\s]+(\w+)', decoded, re.IGNORECASE)
@@ -246,6 +261,7 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
     if bl_m:
         remark_parts.append(f"Bill No: {bl_m.group(1)}")
     if pu_m:
+        c['pu_bill_no'] = pu_m.group(1)
         remark_parts.append(f"Pur No: {pu_m.group(1)}")
     c['remark'] = ', '.join(remark_parts)
 
@@ -300,25 +316,23 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
         c['date'] = dt_m.group(1)
         c['challan_date'] = dt_m.group(1)
 
-    # Item / Quality (up to HSN or end of line)
+    # Item (raw item name, separate from quality)
     item_m = re.search(r'Item\s*[:\s]+(.+?)(?:\s+HSN|\s*$)', text, re.IGNORECASE | re.MULTILINE)
     if item_m:
-        c['quality'] = item_m.group(1).strip()
+        c['item'] = item_m.group(1).strip()
+        c['quality'] = c['item']
 
-    # HSN
-    hsn_m = re.search(r'HSN\s+ACS?\s*[:\s]+(\d+)', text, re.IGNORECASE)
-    if hsn_m:
-        c['hsn_code'] = hsn_m.group(1)
+    c['hsn_code'] = extract_hsn(text)
 
-    # Weaver and Pu.BillNo → remark
-    remark_parts = []
+    # Weaver
     wv_m = re.search(r'Weaver\s*[:\s]+([^\n]+)', text, re.IGNORECASE)
-    pu_m = re.search(r'Pu\.?\s*BillNo\s*[:\s]+(\S+)', text, re.IGNORECASE)
     if wv_m:
-        remark_parts.append(f"Weaver: {wv_m.group(1).strip()}")
+        c['weaver'] = wv_m.group(1).strip()
+
+    # Pu.BillNo
+    pu_m = re.search(r'Pu\.?\s*BillNo\s*[:\s]+(\S+)', text, re.IGNORECASE)
     if pu_m:
-        remark_parts.append(f"Pu.BillNo: {pu_m.group(1).strip()}")
-    c['remark'] = ', '.join(remark_parts)
+        c['pu_bill_no'] = pu_m.group(1).strip()
 
     # Total Taka
     tt_m = re.search(r'Total\s+Taka\s*[:\s]+(\d+)', text, re.IGNORECASE)
