@@ -1,11 +1,35 @@
 import os
+import asyncio
 import tempfile
+import urllib.request
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from extractor import extract_challans_from_pdf
 
-app = FastAPI(title="Challan PDF Extractor API")
+SELF_URL = os.getenv("RENDER_EXTERNAL_URL", "https://challan-extractor.onrender.com")
+
+
+async def keep_alive():
+    loop = asyncio.get_event_loop()
+    while True:
+        await asyncio.sleep(300)  # 5 minutes
+        try:
+            await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(f"{SELF_URL}/health", timeout=10)
+            )
+        except Exception:
+            pass
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    asyncio.create_task(keep_alive())
+    yield
+
+
+app = FastAPI(title="Challan PDF Extractor API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
