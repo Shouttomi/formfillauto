@@ -14,8 +14,125 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+EXAMPLE_RESPONSE = {
+    "count": 2,
+    "challans": [
+        {
+            "date": "14/04/2026",
+            "challan_date": "14/04/2026",
+            "challan_no": "1042",
+            "firm": "JAI MATA DI FASHIONS PVT. LTD.",
+            "lot_book_type": "",
+            "party": "LUCKY FABRICS",
+            "party_address": "123 TEXTILE MARKET, SURAT - 395003",
+            "master_ac": "",
+            "agent": "",
+            "gstin_no": "24AABCL1234A1Z5",
+            "gstin_numbers": ["24AABCL1234A1Z5", "27AABCL5678B1Z3"],
+            "pan_no": "AABCL1234A",
+            "group": "",
+            "marka_help": "LF-VRUNDAVAN",
+            "lot_no": "",
+            "quality": "VRUNDAVAN PRINT",
+            "hsn_code": "540710",
+            "taka": 40,
+            "meter": 1240.5,
+            "fas_rate": 85.0,
+            "amount": 105442.5,
+            "dyed_print": "",
+            "weight": 312.0,
+            "total": 0.0,
+            "lr_no": "LR/2026/0412",
+            "lr_date": "",
+            "chadhti": 0.0,
+            "width": 0.0,
+            "transpoter": "",
+            "remark": "Party: KRISHNA TEXTILES, Bill No: B-291, Pur No: 5503",
+            "weaver": "",
+            "item": "",
+            "pu_bill_no": "5503",
+            "table": [
+                {"tn": 1, "meter": 31.2},
+                {"tn": 2, "meter": 30.8},
+                {"tn": 3, "meter": 31.5},
+                {"tn": 4, "meter": 30.0},
+                {"tn": 5, "meter": 31.0}
+            ]
+        },
+        {
+            "date": "14/04/2026",
+            "challan_date": "14/04/2026",
+            "challan_no": "3318",
+            "firm": "JAI MATA DI FASHIONS PVT. LTD.",
+            "lot_book_type": "",
+            "party": "SUDARSHAN GARMENTS",
+            "party_address": "PLOT 7, RING ROAD, SURAT - 395002",
+            "master_ac": "",
+            "agent": "",
+            "gstin_no": "24ABCDS9876Z1Z2",
+            "gstin_numbers": ["24ABCDS9876Z1Z2"],
+            "pan_no": "ABCDS9876Z",
+            "group": "",
+            "marka_help": "",
+            "lot_no": "",
+            "quality": "HEAVY GEORGETTE 60GMS",
+            "hsn_code": "5407",
+            "taka": 20,
+            "meter": 620.0,
+            "fas_rate": 110.0,
+            "amount": 68200.0,
+            "dyed_print": "",
+            "weight": 186.0,
+            "total": 0.0,
+            "lr_no": "",
+            "lr_date": "",
+            "chadhti": 0.0,
+            "width": 44.0,
+            "transpoter": "",
+            "remark": "",
+            "weaver": "RAMESH WEAVING MILLS",
+            "item": "HEAVY GEORGETTE 60GMS",
+            "pu_bill_no": "PB-1109",
+            "table": [
+                {"tn": 1, "meter": 31.0},
+                {"tn": 2, "meter": 31.5},
+                {"tn": 3, "meter": 30.5},
+                {"tn": 4, "meter": 31.0}
+            ]
+        }
+    ]
+}
 
-@app.post("/extract")
+
+@app.post(
+    "/extract",
+    responses={
+        200: {
+            "description": "Challans extracted successfully",
+            "content": {
+                "application/json": {
+                    "example": EXAMPLE_RESPONSE
+                }
+            },
+        },
+        400: {
+            "description": "Invalid file type",
+            "content": {
+                "application/json": {
+                    "example": {"error": "Only PDF files accepted"}
+                }
+            },
+        },
+        500: {
+            "description": "Extraction failed",
+            "content": {
+                "application/json": {
+                    "example": {"error": "Could not extract text from PDF"}
+                }
+            },
+        },
+    },
+)
 async def extract_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith('.pdf'):
         return JSONResponse(status_code=400, content={"error": "Only PDF files accepted"})
@@ -45,3 +162,9 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/example", summary="Get example API response")
+def example_response():
+    """Returns a sample response so frontend developers know what to expect."""
+    return EXAMPLE_RESPONSE
