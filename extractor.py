@@ -197,7 +197,7 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
         c['pan_no'] = pan_m.group(1).upper()
 
     # Challan number
-    ch_m = re.search(r'CHALLAN\s+NO[.:\s]+(\d+)', decoded, re.IGNORECASE)
+    ch_m = re.search(r'CHALLAN\s+NO[.:\s]+([\w/\-]+)', decoded, re.IGNORECASE)
     if ch_m:
         c['challan_no'] = ch_m.group(1)
 
@@ -306,7 +306,7 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
         c['pan_no'] = pan_m.group(1).upper()
 
     # Challan No
-    ch_m = re.search(r'Challan\s+No[.:\s]+(\d+)', text, re.IGNORECASE)
+    ch_m = re.search(r'Challan\s+No[.:\s]+([\w/\-]+)', text, re.IGNORECASE)
     if ch_m:
         c['challan_no'] = ch_m.group(1)
 
