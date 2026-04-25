@@ -40,7 +40,11 @@ def extract_all_gstins(text: str) -> List[str]:
     """Extract all unique GSTIN numbers from text (handles special PDF chars)."""
     seen = set()
     result = []
-    for raw in re.findall(r'GSTIN[:\s\-]+(\S{14,16})', text, re.IGNORECASE):
+    # Colon-based: handles "GSTIN: VALUE", "GSTIN/UIN NO : VALUE", "GSTIN - : VALUE"
+    colon_matches = re.findall(r'GSTIN[^:\n]{0,30}:\s*(\S{13,16})', text, re.IGNORECASE)
+    # Space/dash fallback: handles "GSTIN VALUE", "GSTIN-VALUE"
+    space_matches = re.findall(r'GSTIN[\s\-]+(\S{13,16})', text, re.IGNORECASE)
+    for raw in colon_matches + space_matches:
         cleaned = re.sub(r'[^A-Z0-9]', '', raw.upper())
         # Valid GSTIN: 13-15 alphanumeric chars starting with 2 digit state code
         if 13 <= len(cleaned) <= 15 and re.match(r'^\d{2}', cleaned):
@@ -85,6 +89,8 @@ def empty_challan() -> Dict[str, Any]:
         "weaver": "",
         "item": "",
         "pu_bill_no": "",
+        "ms_party": "",
+        "delivery_at": "",
         "table": []
     }
 
@@ -269,6 +275,47 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
     return c
 
 
+def parse_table_format_c(text: str) -> List[Dict]:
+    """Parse Srl.No. / Taka No. / Meter table (SHREEJI/DHARMIL style)."""
+    table_map = {}  # taka_no -> (srl_no, meter)
+    in_table = False
+
+    for line in text.split('\n'):
+        stripped = line.strip()
+
+        if re.search(r'Srl\.?\s*No\.?\s+Taka\s+No', stripped, re.IGNORECASE):
+            in_table = True
+            continue
+
+        if not in_table:
+            continue
+
+        if re.search(r'Total\s+Taka', stripped, re.IGNORECASE):
+            break
+
+        nums = re.findall(r'\d+(?:\.\d+)?', stripped)
+        if not nums:
+            continue
+
+        # Rows can have 1–4 entries per line, each group is (srl_no, taka_no, meter)
+        i = 0
+        while i + 2 < len(nums):
+            try:
+                sr = int(float(nums[i]))
+                taka = int(float(nums[i + 1]))
+                meter = to_float(nums[i + 2])
+                if 1 <= sr <= 500 and taka > 0 and meter > 0 and taka not in table_map:
+                    table_map[taka] = (sr, meter)
+                i += 3
+            except (ValueError, IndexError):
+                i += 1
+
+    return sorted(
+        [{"srl_no": sr, "tn": taka, "meter": meter} for taka, (sr, meter) in table_map.items()],
+        key=lambda x: x['srl_no']
+    )
+
+
 def parse_format_b(raw_text: str) -> Dict[str, Any]:
     """Parse Mill Challan (SUDARSHAN GARMENTS style — plain text, printed twice per page)."""
     c = empty_challan()
@@ -348,11 +395,81 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
     return c
 
 
+def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
+    """Parse Delivery Challan (DHARMIL TEXTILES / SHREEJI style — Srl.No./Taka No./Meter table)."""
+    c = empty_challan()
+    lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+
+    c['party'] = lines[0] if lines else ''
+
+    addr_parts = []
+    for line in lines[1:5]:
+        if re.match(r'(Phone|GSTIN)', line, re.IGNORECASE):
+            break
+        addr_parts.append(line)
+    c['party_address'] = ' '.join(addr_parts)
+
+    all_gstins = extract_all_gstins(raw_text)
+    c['gstin_numbers'] = all_gstins
+    c['gstin_no'] = all_gstins[0] if all_gstins else ''
+
+    ch_m = re.search(r'Challan\s+No[.:\s]+(\d+)', raw_text, re.IGNORECASE)
+    if ch_m:
+        c['challan_no'] = ch_m.group(1)
+
+    dt_m = re.search(r'Date\s*[:\s]+(\d{1,2}[-/]\d{1,2}[-/]\d{4})', raw_text, re.IGNORECASE)
+    if dt_m:
+        c['date'] = dt_m.group(1).replace('-', '/')
+        c['challan_date'] = c['date']
+
+    q_m = re.search(r'Quality\s*[:\s]+([^\n]+)', raw_text, re.IGNORECASE)
+    if q_m:
+        c['quality'] = q_m.group(1).strip()
+
+    c['hsn_code'] = extract_hsn(raw_text)
+
+    broker_m = re.search(r'Broc?ker\s*[:\s]+([^\n]+)', raw_text, re.IGNORECASE)
+    if broker_m:
+        c['agent'] = broker_m.group(1).strip()
+
+    tt_m = re.search(r'Total\s+Taka\s*[:\s]+(\d+)', raw_text, re.IGNORECASE)
+    if tt_m:
+        c['taka'] = int(tt_m.group(1))
+
+    tm_m = re.search(r'Total\s+Meter\s*[:\s]+([0-9,.]+)', raw_text, re.IGNORECASE)
+    if tm_m:
+        c['meter'] = to_float(tm_m.group(1))
+
+    # Use layout text (two-column aware) for M/s party, Delivery At, and Remark
+    if layout_text:
+        layout_lines = layout_text.split('\n')
+        for i, line in enumerate(layout_lines):
+            if re.search(r'M/s\.\s+Party\s+Delivery\s+At', line, re.IGNORECASE):
+                if i + 1 < len(layout_lines):
+                    data_line = re.sub(r'\s+Date\s*:.*$', '', layout_lines[i + 1])
+                    parts = [p.strip() for p in re.split(r'\s{3,}', data_line) if p.strip()]
+                    c['ms_party'] = parts[0] if parts else ''
+                    c['delivery_at'] = parts[1] if len(parts) > 1 else ''
+                break
+
+        for line in layout_lines:
+            if re.match(r'\s+Remark\s*:', line, re.IGNORECASE):
+                remark_m = re.search(r'Remark\s*:(.+)', line)
+                if remark_m:
+                    c['remark'] = remark_m.group(1).strip()
+                break
+
+    c['table'] = parse_table_format_c(raw_text)
+    return c
+
+
 def detect_format(text: str) -> str:
     if re.search(r'JJJJ|DDDDEEEELLLLIIIIVVVVEEEERRRRYYYY', text):
         return 'A'
     if re.search(r'MILL\s+CHALLAN', text, re.IGNORECASE):
         return 'B'
+    if re.search(r'Srl\.?\s*No\.?\s+Taka\s+No', text, re.IGNORECASE):
+        return 'C'
     return 'A'
 
 
@@ -367,7 +484,13 @@ def extract_challans_from_pdf(pdf_path: str) -> List[Dict[str, Any]]:
                 continue
 
             fmt = detect_format(text)
-            challan = parse_format_a(text) if fmt == 'A' else parse_format_b(text)
+            if fmt == 'A':
+                challan = parse_format_a(text)
+            elif fmt == 'B':
+                challan = parse_format_b(text)
+            else:
+                layout_text = page.extract_text(layout=True) or ''
+                challan = parse_format_c(text, layout_text)
 
             cn = challan.get('challan_no', '')
             if cn and cn in seen:
