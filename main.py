@@ -52,7 +52,7 @@ EXAMPLE_RESPONSE = {
             "master_ac": "",
             "agent": "",
             "gstin_no": "24AABCL1234A1Z5",
-            "gstin_numbers": ["24AABCL1234A1Z5", "27AABCL5678B1Z3"],
+            "gstin_map": {"LUCKY FABRICS": "24AABCL1234A1Z5", "JAI MATA DI FASHIONS PVT. LTD.": "27AABCL5678B1Z3"},
             "pan_no": "AABCL1234A",
             "group": "",
             "marka_help": "LF-VRUNDAVAN",
@@ -76,11 +76,11 @@ EXAMPLE_RESPONSE = {
             "item": "",
             "pu_bill_no": "5503",
             "table": [
-                {"tn": 1, "meter": 31.2},
-                {"tn": 2, "meter": 30.8},
-                {"tn": 3, "meter": 31.5},
-                {"tn": 4, "meter": 30.0},
-                {"tn": 5, "meter": 31.0}
+                {"srl_no": 1, "meter": 31.2},
+                {"srl_no": 2, "meter": 30.8},
+                {"srl_no": 3, "meter": 31.5},
+                {"srl_no": 4, "meter": 30.0},
+                {"srl_no": 5, "meter": 31.0}
             ]
         },
         {
@@ -94,7 +94,7 @@ EXAMPLE_RESPONSE = {
             "master_ac": "",
             "agent": "",
             "gstin_no": "24ABCDS9876Z1Z2",
-            "gstin_numbers": ["24ABCDS9876Z1Z2"],
+            "gstin_map": {"SUDARSHAN GARMENTS": "24ABCDS9876Z1Z2"},
             "pan_no": "ABCDS9876Z",
             "group": "",
             "marka_help": "",
@@ -118,10 +118,10 @@ EXAMPLE_RESPONSE = {
             "item": "HEAVY GEORGETTE 60GMS",
             "pu_bill_no": "PB-1109",
             "table": [
-                {"tn": 1, "meter": 31.0},
-                {"tn": 2, "meter": 31.5},
-                {"tn": 3, "meter": 30.5},
-                {"tn": 4, "meter": 31.0}
+                {"srl_no": 1, "meter": 31.0},
+                {"srl_no": 2, "meter": 31.5},
+                {"srl_no": 3, "meter": 30.5},
+                {"srl_no": 4, "meter": 31.0}
             ]
         }
     ]

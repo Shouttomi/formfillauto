@@ -40,8 +40,8 @@ def extract_all_gstins(text: str) -> List[str]:
     """Extract all unique GSTIN numbers from text (handles special PDF chars)."""
     seen = set()
     result = []
-    # Colon-based: handles "GSTIN: VALUE", "GSTIN/UIN NO : VALUE", "GSTIN - : VALUE"
-    colon_matches = re.findall(r'GSTIN[^:\n]{0,30}:\s*(\S{13,16})', text, re.IGNORECASE)
+    # Colon-based: handles "GSTIN: VALUE", "GSTIN/UIN NO : VALUE", "GST : VALUE", "GSTIN :- VALUE"
+    colon_matches = re.findall(r'GST[^:\n]{0,30}:[:\-\s]*(\S{13,16})', text, re.IGNORECASE)
     # Space/dash fallback: handles "GSTIN VALUE", "GSTIN-VALUE"
     space_matches = re.findall(r'GSTIN[\s\-]+(\S{13,16})', text, re.IGNORECASE)
     for raw in colon_matches + space_matches:
@@ -66,7 +66,7 @@ def empty_challan() -> Dict[str, Any]:
         "master_ac": "",
         "agent": "",
         "gstin_no": "",
-        "gstin_numbers": [],
+        "gstin_map": {},
         "pan_no": "",
         "group": "",
         "marka_help": "",
@@ -138,7 +138,7 @@ def parse_table_format_a(raw_text: str) -> List[Dict]:
                     pass
 
     return [
-        {"tn": k, "meter": v}
+        {"srl_no": k, "meter": v}
         for k, v in sorted(table_rows.items())
     ]
 
@@ -171,7 +171,7 @@ def parse_table_format_b(text: str) -> List[Dict]:
                 pass
 
     return [
-        {"tn": k, "meter": v}
+        {"srl_no": k, "meter": v}
         for k, v in sorted(table_rows.items())
     ]
 
@@ -194,7 +194,6 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
 
     # All GSTINs — search decoded text (handles quadrupled encoding) + raw (catches plain ones)
     all_gstins = extract_all_gstins(decoded) or extract_all_gstins(raw_text)
-    c['gstin_numbers'] = all_gstins
     c['gstin_no'] = all_gstins[0] if all_gstins else ""
 
     # PAN No (format: 5 letters + 4 digits + 1 letter = 10 chars)
@@ -262,14 +261,23 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
     sp_m = re.search(r'PARTY\s*[:\s]+([A-Z][A-Z\s]+?)(?:\s+PUR|\s*$)', decoded, re.IGNORECASE | re.MULTILINE)
     bl_m = re.search(r'BILL\s+NO[:\s]+(\w+)', decoded, re.IGNORECASE)
     pu_m = re.search(r'PUR\.\s*NO\.\s*[:\s]+(\d+)', decoded, re.IGNORECASE)
-    if sp_m:
-        remark_parts.append(f"Party: {sp_m.group(1).strip()}")
+    sub_party = sp_m.group(1).strip() if sp_m else ''
+    if sub_party:
+        remark_parts.append(f"Party: {sub_party}")
     if bl_m:
         remark_parts.append(f"Bill No: {bl_m.group(1)}")
     if pu_m:
         c['pu_bill_no'] = pu_m.group(1)
         remark_parts.append(f"Pur No: {pu_m.group(1)}")
     c['remark'] = ', '.join(remark_parts)
+
+    # Build gstin_map: firm name → GSTIN
+    gstin_map = {}
+    firm_order = [c['party'], c['firm'], sub_party]
+    for i, name in enumerate(firm_order):
+        if name and i < len(all_gstins):
+            gstin_map[name] = all_gstins[i]
+    c['gstin_map'] = gstin_map
 
     c['table'] = parse_table_format_a(raw_text)
     return c
@@ -344,7 +352,6 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
 
     # All GSTINs
     all_gstins = extract_all_gstins(text)
-    c['gstin_numbers'] = all_gstins
     c['gstin_no'] = all_gstins[0] if all_gstins else ""
 
     # PAN No
@@ -391,6 +398,14 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
     if tm_m:
         c['meter'] = to_float(tm_m.group(1))
 
+    # Build gstin_map: party → gstin[0], firm (consignee) → gstin[1]
+    gstin_map = {}
+    if c['party'] and all_gstins:
+        gstin_map[c['party']] = all_gstins[0]
+    if c['firm'] and len(all_gstins) > 1:
+        gstin_map[c['firm']] = all_gstins[1]
+    c['gstin_map'] = gstin_map
+
     c['table'] = parse_table_format_b(text)
     return c
 
@@ -410,7 +425,6 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
     c['party_address'] = ' '.join(addr_parts)
 
     all_gstins = extract_all_gstins(raw_text)
-    c['gstin_numbers'] = all_gstins
     c['gstin_no'] = all_gstins[0] if all_gstins else ''
 
     ch_m = re.search(r'Challan\s+No[.:\s]+(\d+)', raw_text, re.IGNORECASE)
@@ -458,6 +472,14 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
                 if remark_m:
                     c['remark'] = remark_m.group(1).strip()
                 break
+
+    # Build gstin_map after ms_party/delivery_at are set by layout parsing above
+    gstin_map = {}
+    firm_order = [c['party'], c['ms_party'], c['delivery_at']]
+    for i, name in enumerate(firm_order):
+        if name and i < len(all_gstins):
+            gstin_map[name] = all_gstins[i]
+    c['gstin_map'] = gstin_map
 
     c['table'] = parse_table_format_c(raw_text)
     return c
