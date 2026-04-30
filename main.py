@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from extractor import extract_challans_from_pdf
+from extractor import extract_challans, extract_challans_from_pdf
 
 SELF_URL = os.getenv("RENDER_EXTERNAL_URL", "https://challan-extractor.onrender.com")
 
@@ -143,7 +143,7 @@ EXAMPLE_RESPONSE = {
             "description": "Invalid file type",
             "content": {
                 "application/json": {
-                    "example": {"error": "Only PDF files accepted"}
+                    "example": {"error": "Only PDF, JPEG, and PNG files accepted"}
                 }
             },
         },
@@ -151,23 +151,26 @@ EXAMPLE_RESPONSE = {
             "description": "Extraction failed",
             "content": {
                 "application/json": {
-                    "example": {"error": "Could not extract text from PDF"}
+                    "example": {"error": "Could not extract text from file"}
                 }
             },
         },
     },
 )
 async def extract_pdf(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith('.pdf'):
-        return JSONResponse(status_code=400, content={"error": "Only PDF files accepted"})
+    filename_lower = file.filename.lower()
+    valid_extensions = ('.pdf', '.jpg', '.jpeg', '.png')
+    if not filename_lower.endswith(valid_extensions):
+        return JSONResponse(status_code=400, content={"error": "Only PDF, JPEG, and PNG files accepted"})
 
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+        ext = ''.join([e for e in ['.pdf', '.jpg', '.jpeg', '.png'] if filename_lower.endswith(e)])
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
 
-        challans = extract_challans_from_pdf(tmp_path)
+        challans = extract_challans(tmp_path)
         return {"challans": challans, "count": len(challans)}
 
     except Exception as e:

@@ -1,6 +1,208 @@
 import re
+import os
 import pdfplumber
+import pytesseract
+from pytesseract import Output
+from PIL import Image, ImageEnhance, ImageFilter
 from typing import List, Dict, Any
+
+
+def _preprocess_image(image: Image.Image) -> Image.Image:
+    """Enhance image quality before OCR: grayscale, contrast, sharpness, upscale."""
+    image = image.convert('L')
+    if image.width < 1800:
+        scale = 1800 / image.width
+        image = image.resize((int(image.width * scale), int(image.height * scale)), Image.LANCZOS)
+    image = ImageEnhance.Contrast(image).enhance(2.0)
+    image = ImageEnhance.Sharpness(image).enhance(2.0)
+    return image
+
+
+def _ensure_tesseract_path() -> None:
+    tesseract_path = r'C:\Program Files\Tesseract-OCR'
+    if tesseract_path not in os.environ.get('PATH', ''):
+        os.environ['PATH'] = tesseract_path + os.pathsep + os.environ.get('PATH', '')
+
+
+def _ocr_image(image: Image.Image, config: str = '') -> str:
+    _ensure_tesseract_path()
+    return pytesseract.image_to_string(image, config=config)
+
+
+def extract_layout_text_from_image(image_path: str) -> str:
+    """Rebuild OCR output into line-oriented text using tesseract word positions."""
+    try:
+        image = _preprocess_image(Image.open(image_path))
+        _ensure_tesseract_path()
+        data = pytesseract.image_to_data(image, output_type=Output.DICT, config=r'--oem 3 --psm 6')
+
+        lines = {}
+        n = len(data.get('text', []))
+        for i in range(n):
+            word = (data['text'][i] or '').strip()
+            if not word:
+                continue
+            conf = str(data.get('conf', [''])[i]).strip()
+            try:
+                if conf and float(conf) < 0:
+                    continue
+            except ValueError:
+                pass
+
+            key = (data['block_num'][i], data['par_num'][i], data['line_num'][i])
+            lines.setdefault(key, []).append({
+                'left': int(data['left'][i]),
+                'width': int(data['width'][i]),
+                'text': word,
+            })
+
+        rendered_lines = []
+        for key in sorted(lines.keys()):
+            words = sorted(lines[key], key=lambda item: item['left'])
+            if not words:
+                continue
+
+            parts = []
+            prev_right = None
+            for word in words:
+                if prev_right is not None:
+                    gap = max(1, int((word['left'] - prev_right) / 28))
+                    parts.append(' ' * min(gap, 8))
+                parts.append(word['text'])
+                prev_right = word['left'] + word['width']
+
+            rendered_lines.append(''.join(parts).strip())
+
+        return '\n'.join(rendered_lines)
+    except Exception:
+        return ""
+
+
+def extract_table_text_from_image(image_path: str) -> str:
+    """Extract text from image specifically optimized for blurry table numbers."""
+    try:
+        image = _preprocess_image(Image.open(image_path))
+        # Use psm 6 (single block) to maximize number extraction in blurry regions
+        text = _ocr_image(image, config=r'--oem 3 --psm 6')
+        return text
+    except Exception:
+        return ""
+
+
+def extract_text_from_image(image_path: str, preprocess: bool = False, config: str = '') -> str:
+    """Extract text from JPEG/PNG using Tesseract OCR (default layout)."""
+    try:
+        image = Image.open(image_path)
+        if preprocess:
+            image = _preprocess_image(image)
+        text = _ocr_image(image, config=config)
+        return text
+    except Exception as e:
+        raise ValueError(f"Failed to extract text from image: {str(e)}")
+
+
+def _merge_extracted_challans(primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
+    """Fill missing fields in primary using values from secondary."""
+    merged = dict(primary)
+
+    for key, value in secondary.items():
+        current = merged.get(key)
+
+        if key == 'gstin_map':
+            current_map = current if isinstance(current, dict) else {}
+            secondary_map = value if isinstance(value, dict) else {}
+            if current_map:
+                merged[key] = current_map
+                continue
+            cleaned_secondary = {}
+            for map_key, map_value in secondary_map.items():
+                normalized_key = re.sub(r'[^A-Z0-9 ]', '', str(map_key).upper()).strip()
+                if (
+                    map_value
+                    and normalized_key
+                    and len(normalized_key) >= 6
+                    and re.search(r'[A-Z]{3,}', normalized_key)
+                ):
+                    cleaned_secondary[map_key] = map_value
+            merged[key] = {**current_map, **cleaned_secondary}
+            continue
+
+        if key == 'table':
+            current_table = current if isinstance(current, list) else []
+            secondary_table = value if isinstance(value, list) else []
+            if len(secondary_table) > len(current_table):
+                merged[key] = secondary_table
+            continue
+
+        if isinstance(current, str):
+            if (not current.strip()) and isinstance(value, str) and value.strip():
+                merged[key] = value
+        elif isinstance(current, (int, float)):
+            if current == 0 and isinstance(value, (int, float)) and value != 0:
+                merged[key] = value
+        elif isinstance(current, dict):
+            if not current and isinstance(value, dict) and value:
+                merged[key] = value
+        elif current in (None, '', [], {}):
+            if value not in (None, '', [], {}):
+                merged[key] = value
+
+    return merged
+
+
+def _looks_like_noisy_quality(value: str) -> bool:
+    if not value:
+        return True
+    return bool(re.search(r'ROAD|SURAT|GUJARAT|ESTATE|BROKER|PHONE|GSTIN|BLOCK', value, re.IGNORECASE))
+
+
+def _postprocess_image_challan(challan: Dict[str, Any], candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    result = dict(challan)
+
+    for candidate in candidates:
+        quality = str(candidate.get('quality', '')).strip()
+        if quality and (_looks_like_noisy_quality(result.get('quality', '')) and not _looks_like_noisy_quality(quality)):
+            result['quality'] = quality
+
+        party = str(candidate.get('party', '')).strip()
+        if party and re.search(r'GSTIN|CHALLAN|DATE|METER', str(result.get('party', '')), re.IGNORECASE):
+            if not re.search(r'GSTIN|CHALLAN|DATE|METER', party, re.IGNORECASE):
+                result['party'] = party
+
+        meter = candidate.get('meter', 0.0) or 0.0
+        if result.get('meter', 0.0) < 10 and meter > result.get('meter', 0.0):
+            result['meter'] = meter
+
+    return result
+
+
+def clean_ocr_text(text: str) -> str:
+    """Clean and normalize OCR text to fix common errors."""
+    # Replace common OCR misreadings
+    replacements = [
+        (r'\(\d+D\)', lambda m: m.group(0).replace('D', '')),  # (8D) -> (8)
+        (r'fy\)', ''),            # Noise
+        (r'aes\s+Baas', 'as Basic'),  # OCR error pattern
+        (r'FagHoIN', 'Fashions'),     # Common OCR error
+        (r'JAIMATAD[\)I]', 'JAI MATA DI'),  # OCR error
+        (r'(?<=[A-Z])o(?=[A-Z])', '0'),  # Letter O to digit 0 in certain contexts
+        # Fix Challan No like "Challan No (8D" -> "Challan No : 8"
+        (r'Challan\s+No\s*\((\d+)D?\)?', r'Challan No : \1'),  # (8D or (8D) -> : 8
+        # Fix bare 3-digit year like "626" after "Challan Date" -> "2026" (last 2 digits + '20' prefix)
+        (r'(Challan\s+Date)\s+(6(\d{2}))\b', r'\1 20\3'),
+        # Fix "Qlty :" -> "Qlty:"
+        (r'Qlty\s*:', 'Qlty:'),
+        # Fix "Meters:" written as "Meter :" etc
+        (r'Meter\s*:', 'Meters:'),
+    ]
+
+    for pattern, replacement in replacements:
+        if callable(replacement):
+            text = re.sub(pattern, replacement, text)
+        else:
+            text = re.sub(pattern, replacement, text)
+
+    return text
 
 
 def decode_quad(text: str) -> str:
@@ -37,15 +239,19 @@ def extract_hsn(text: str) -> str:
 
 
 def extract_all_gstins(text: str) -> List[str]:
-    """Extract all unique GSTIN numbers from text (handles special PDF chars)."""
+    """Extract all unique GSTIN numbers from text (handles special PDF chars and OCR errors)."""
     seen = set()
     result = []
-    # Colon-based: handles "GSTIN: VALUE", "GSTIN/UIN NO : VALUE", "GST : VALUE", "GSTIN :- VALUE"
-    colon_matches = re.findall(r'GST[^:\n]{0,30}:[:\-\s]*(\S{13,16})', text, re.IGNORECASE)
-    # Space/dash fallback: handles "GSTIN VALUE", "GSTIN-VALUE"
-    space_matches = re.findall(r'GSTIN[\s\-]+(\S{13,16})', text, re.IGNORECASE)
-    for raw in colon_matches + space_matches:
-        cleaned = re.sub(r'[^A-Z0-9]', '', raw.upper())
+    # More flexible patterns to handle OCR errors
+    # Pattern 1: "GST ... : VALUE" or "GST ... No : VALUE"
+    colon_matches = re.findall(r'(?:GST|GSTIN)[^:\n]{0,35}:\s*([A-Z0-9]{13,16})', text, re.IGNORECASE)
+    # Pattern 2: "GST No space VALUE"
+    space_matches = re.findall(r'(?:GST|GSTIN)[\s\-]+([A-Z0-9]{13,16})', text, re.IGNORECASE)
+    # Pattern 3: Just look for 13-16 alphanumeric sequences that look like GSTINs
+    raw_matches = re.findall(r'\b([0-9]{2}[A-Z0-9]{11,14})\b', text)
+
+    for raw in colon_matches + space_matches + raw_matches:
+        cleaned = re.sub(r'[^A-Z0-9]', '', str(raw).upper())
         # Valid GSTIN: 13-15 alphanumeric chars starting with 2 digit state code
         if 13 <= len(cleaned) <= 15 and re.match(r'^\d{2}', cleaned):
             if cleaned not in seen:
@@ -284,28 +490,49 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
 
 
 def parse_table_format_c(text: str) -> List[Dict]:
-    """Parse Srl.No. / Taka No. / Meter table (SHREEJI/DHARMIL style)."""
+    """Parse Srl.No. / Taka No. / Meter table (SHREEJI/DHARMIL/HK POLY FAB style)."""
     table_map = {}  # taka_no -> (srl_no, meter)
     in_table = False
+
+    # Header pattern: either "Sr/Srl.No ... Taka No" OR "Taka No ... Sr/Srl.No" (handles OCR column reversal)
+    HEADER_RE = re.compile(
+        r'(?:'
+        r'(?:Srl?\.?\s*No\.?|\bSr\b).*?Taka\s*No'   # normal order
+        r'|'
+        r'Taka\s*No.*?(?:Srl?\.?\s*No\.?|\bSr\b)'   # reversed order
+        r')',
+        re.IGNORECASE
+    )
 
     for line in text.split('\n'):
         stripped = line.strip()
 
-        if re.search(r'Srl\.?\s*No\.?\s+Taka\s+No', stripped, re.IGNORECASE):
+        if HEADER_RE.search(stripped):
             in_table = True
             continue
 
-        if not in_table:
+        # Normalize comma-as-decimal (e.g. "120,00" -> "120.00")
+        normalized = re.sub(r'(\d+),(\d{2})\b', r'\1.\2', stripped)
+        nums = re.findall(r'\d+(?:\.\d+)?', normalized)
+
+        # Auto-enter table mode if we see typical 3-column row data (Srl, Taka, Meter)
+        # This is strict to prevent picking up address numbers like '271 TO 273'
+        if not in_table and len(nums) >= 3:
+            try:
+                sr = int(float(nums[0]))
+                meter = float(nums[2])
+                if 1 <= sr <= 500 and meter > 0:
+                    in_table = True
+            except ValueError:
+                pass
+
+        if not in_table or not nums:
             continue
 
         if re.search(r'Total\s+Taka', stripped, re.IGNORECASE):
             break
 
-        nums = re.findall(r'\d+(?:\.\d+)?', stripped)
-        if not nums:
-            continue
-
-        # Rows can have 1–4 entries per line, each group is (srl_no, taka_no, meter)
+        # Each group is (srl_no, taka_no, meter) — skip if meter == 0
         i = 0
         while i + 2 < len(nums):
             try:
@@ -317,6 +544,27 @@ def parse_table_format_c(text: str) -> List[Dict]:
                 i += 3
             except (ValueError, IndexError):
                 i += 1
+
+        # Fallback: only 2 numbers on a line -> (srl, meter), no taka column
+        if len(nums) == 2:
+            try:
+                sr = int(float(nums[0]))
+                meter = to_float(nums[1])
+                if 1 <= sr <= 500 and meter > 0 and sr not in table_map:
+                    table_map[sr] = (sr, meter)
+            except (ValueError, IndexError):
+                pass
+
+        # Single number that looks like a meter reading (>5.0) -> assign to next sr
+        elif len(nums) == 1:
+            try:
+                val = to_float(nums[0])
+                if val > 5.0:
+                    next_sr = max(table_map.keys(), default=0) + 1
+                    if next_sr <= 500 and next_sr not in table_map:
+                        table_map[next_sr] = (next_sr, val)
+            except (ValueError, IndexError):
+                pass
 
     return sorted(
         [{"srl_no": sr, "tn": taka, "meter": meter} for taka, (sr, meter) in table_map.items()],
@@ -416,9 +664,25 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
     lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
 
     c['party'] = lines[0] if lines else ''
+    party_index = 0
+    # Skip leading OCR noise lines and obvious headers.
+    skip_party_patterns = (
+        r'GSTIN|DELIVERY\s+CHALLAN|CHALLAN\s+NO|DATE|PHONE|BROC?KER|M/S|TOTAL|SRI?L?\.?\s*NO'
+    )
+    for idx, line in enumerate(lines):
+        normalized_line = re.sub(r'[^A-Z ]', '', line.upper()).strip()
+        if (
+            len(line) >= 3
+            and re.search(r'[A-Z]', line)
+            and not re.search(skip_party_patterns, line, re.IGNORECASE)
+            and len(normalized_line) >= 6
+        ):
+            c['party'] = line
+            party_index = idx
+            break
 
     addr_parts = []
-    for line in lines[1:5]:
+    for line in lines[party_index + 1:party_index + 5]:
         if re.match(r'(Phone|GSTIN)', line, re.IGNORECASE):
             break
         addr_parts.append(line)
@@ -427,16 +691,55 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
     all_gstins = extract_all_gstins(raw_text)
     c['gstin_no'] = all_gstins[0] if all_gstins else ''
 
-    ch_m = re.search(r'Challan\s+No[.:\s]+(\d+)', raw_text, re.IGNORECASE)
-    if ch_m:
-        c['challan_no'] = ch_m.group(1)
+    # More flexible challan number pattern - handles OCR errors like "(8D)" instead of ": 3"
+    ch_patterns = [
+        r'Challan\s+No[.:\s]+(\d+)',
+        r'Challan\s+No[:\s]*\(?\s*(\d+)',   # Handles OCR errors like "No(8" or "No(3"
+        r'Challan\s+[Nn]o[^0-9]*(\d{1,4})', # Generic: Challan No followed by 1-4 digits
+    ]
+    for pat in ch_patterns:
+        ch_m = re.search(pat, raw_text, re.IGNORECASE)
+        if ch_m:
+            num = ch_m.group(1)
+            # Take the first 1-4 digits to avoid OCR corruption
+            num_match = re.match(r'(\d{1,4})', num)
+            if num_match:
+                num = num_match.group(1)
+                if int(num) < 10000:  # Reasonable challan number range
+                    c['challan_no'] = num
+            break
 
-    dt_m = re.search(r'Date\s*[:\s]+(\d{1,2}[-/]\d{1,2}[-/]\d{4})', raw_text, re.IGNORECASE)
-    if dt_m:
-        c['date'] = dt_m.group(1).replace('-', '/')
-        c['challan_date'] = c['date']
+    # More flexible date patterns - handles partial dates from OCR
+    dt_patterns = [
+        r'(?:Challan\s+)?Date\s*[:\s]+(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+        r'Date\s*[:\s]+(\d{4})',   # Just year (e.g., "2026")
+        r'Date\s*[:\s]+(20\d{2})', # Explicit 20XX year
+    ]
+    for pat in dt_patterns:
+        dt_m = re.search(pat, raw_text, re.IGNORECASE)
+        if dt_m:
+            date_val = dt_m.group(1).replace('-', '/')
+            if '/' in date_val or (len(date_val) == 4 and date_val.isdigit() and 2000 <= int(date_val) <= 2100):
+                c['date'] = date_val
+                c['challan_date'] = date_val
+            break
 
-    q_m = re.search(r'Quality\s*[:\s]+([^\n]+)', raw_text, re.IGNORECASE)
+    # Fallback: Try to find bare 3 or 4-digit year after "Challan Date"
+    if not c['date']:
+        year_m = re.search(r'Challan\s+Date\s+(\d{3,4})', raw_text, re.IGNORECASE)
+        if year_m:
+            year_str = year_m.group(1)
+            # 3-digit OCR year e.g. "626" -> last 2 digits = "26" -> "2026"
+            if len(year_str) == 3:
+                year_str = '20' + year_str[-2:]
+            if year_str.isdigit() and 2000 <= int(year_str) <= 2100:
+                c['date'] = year_str
+                c['challan_date'] = year_str
+
+    # Match Qlty, Qlty:, Quality:, Quality *: (handles OCR spacing)
+    q_m = re.search(r'Ql(?:ty|uality)\s*[:\*\s]+([^\n]+?)\s*(?:\n|$)', raw_text, re.IGNORECASE)
+    if not q_m:
+        q_m = re.search(r'Quality\s*[:\s]+([^\n]+)', raw_text, re.IGNORECASE)
     if q_m:
         c['quality'] = q_m.group(1).strip()
 
@@ -450,28 +753,71 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
     if tt_m:
         c['taka'] = int(tt_m.group(1))
 
-    tm_m = re.search(r'Total\s+Meter\s*[:\s]+([0-9,.]+)', raw_text, re.IGNORECASE)
+    # More flexible meter pattern - handles "Meters: 1611.00", "Mts: 1611", "Total Taka: 14 Meters: 1611.00"
+    # First try combined pattern (most specific)
+    tm_m = re.search(r'Total\s+(?:Taka|Mts)[^\n]*?Meters?\s*[:\s.]+([0-9,.]+)', raw_text, re.IGNORECASE)
     if tm_m:
         c['meter'] = to_float(tm_m.group(1))
+    else:
+        # Try standalone Meters: / Mts: patterns
+        for pat in [
+            r'Total\s+Meters?\s*[:\s._-]+([0-9,.]+)',
+            r'Total\s+Mts\.?\s*[:\s]+([0-9,.]+)',
+        ]:
+            tm_m = re.search(pat, raw_text, re.IGNORECASE)
+            if tm_m:
+                c['meter'] = to_float(tm_m.group(1))
+                break
 
     # Use layout text (two-column aware) for M/s party, Delivery At, and Remark
     if layout_text:
         layout_lines = layout_text.split('\n')
         for i, line in enumerate(layout_lines):
-            if re.search(r'M/s\.\s+Party\s+Delivery\s+At', line, re.IGNORECASE):
-                if i + 1 < len(layout_lines):
-                    data_line = re.sub(r'\s+Date\s*:.*$', '', layout_lines[i + 1])
-                    parts = [p.strip() for p in re.split(r'\s{3,}', data_line) if p.strip()]
-                    c['ms_party'] = parts[0] if parts else ''
-                    c['delivery_at'] = parts[1] if len(parts) > 1 else ''
+            if re.search(r'Party\.?\s+Delivery\s+At', line, re.IGNORECASE):
+                data_lines = []
+                for candidate_line in layout_lines[i + 1:i + 4]:
+                    if re.search(r'Broc?ker|GSTIN|Remark|Sri\.?No|Taka\s*No', candidate_line, re.IGNORECASE):
+                        break
+                    data_lines.append(candidate_line)
+                data_line = re.sub(r'\s+Date\s*:?.*$', '', ' '.join(data_lines))
+                parts = [p.strip() for p in re.split(r'\s{3,}', data_line) if p.strip()]
+                c['ms_party'] = parts[0] if parts else ''
+                c['delivery_at'] = parts[1] if len(parts) > 1 else ''
                 break
 
         for line in layout_lines:
-            if re.match(r'\s+Remark\s*:', line, re.IGNORECASE):
-                remark_m = re.search(r'Remark\s*:(.+)', line)
+            if re.search(r'Remark\s*[:.]', line, re.IGNORECASE):
+                remark_m = re.search(r'Remark\s*[:.]\s*(.+)', line)
                 if remark_m:
-                    c['remark'] = remark_m.group(1).strip()
+                    c['remark'] = remark_m.group(1).strip(' .')
                 break
+
+    if not c['ms_party'] or not c['delivery_at']:
+        combined_layout = re.sub(r'\s+', ' ', layout_text or raw_text)
+        delivery_match = re.search(
+            r'(J[AI/\\\s]*MATA\s*D[I1]?\s*FASHIONS?\s*PVT\.?\s*LTD\.?(?:\s*\(UNIT-?\d+\))?)',
+            combined_layout,
+            re.IGNORECASE
+        )
+        if delivery_match:
+            c['delivery_at'] = c['delivery_at'] or delivery_match.group(1).strip(' |:-')
+            prefix = combined_layout[:delivery_match.start()]
+            prefix = re.sub(r'.*?(?:M/s\.?|Party\.?\s*Delivery\s*At[: ]?)', '', prefix, flags=re.IGNORECASE)
+            prefix = re.sub(r'\b(?:Challan|Date|Quality|Broker|GSTIN|Tempo)\b.*$', '', prefix, flags=re.IGNORECASE)
+            prefix = prefix.strip(' |:-')
+            if prefix:
+                c['ms_party'] = c['ms_party'] or prefix
+
+        party_block = re.search(
+            r'(?:M/s\.?\s*[: ]\s*|M/s\.?\s*Party\.?\s*Delivery\s*At[: ]\s*)'
+            r'(.+?)\s+(JAI\s*MATA\s*D[I1]\s*FASHIONS?\s*PVT\.?\s*LTD\.?(?:\s*\(UNIT-?\d+\))?)'
+            r'(?=\s+(?:Challan|Date|Quality|Broker|GSTIN|Tempo)\b)',
+            combined_layout,
+            re.IGNORECASE
+        )
+        if party_block:
+            c['ms_party'] = c['ms_party'] or party_block.group(1).strip(' |:-')
+            c['delivery_at'] = c['delivery_at'] or party_block.group(2).strip(' |:-')
 
     # Build gstin_map after ms_party/delivery_at are set by layout parsing above
     gstin_map = {}
@@ -490,7 +836,11 @@ def detect_format(text: str) -> str:
         return 'A'
     if re.search(r'MILL\s+CHALLAN', text, re.IGNORECASE):
         return 'B'
-    if re.search(r'Srl\.?\s*No\.?\s+Taka\s+No', text, re.IGNORECASE):
+    # Format C: relaxed — handles garbled OCR headers like "Sr TakaNo", "Srl.No. Taka No rs"
+    if re.search(r'(?:Srl?\.?\s*No\.?|\bSr\b).*?Taka\s*No', text, re.IGNORECASE):
+        return 'C'
+    # Also treat plain DELIVERY CHALLAN docs as format C
+    if re.search(r'DELIVERY\s+CHALLAN', text, re.IGNORECASE):
         return 'C'
     return 'A'
 
@@ -523,3 +873,54 @@ def extract_challans_from_pdf(pdf_path: str) -> List[Dict[str, Any]]:
             challans.append(challan)
 
     return challans
+
+
+def extract_challans(file_path: str) -> List[Dict[str, Any]]:
+    """Extract challans from PDF or image (JPEG/PNG) files."""
+    file_ext = os.path.splitext(file_path)[1].lower()
+
+    if file_ext == '.pdf':
+        return extract_challans_from_pdf(file_path)
+    elif file_ext in ['.jpg', '.jpeg', '.png']:
+        default_text = clean_ocr_text(extract_text_from_image(file_path))
+        enhanced_text = clean_ocr_text(
+            extract_text_from_image(file_path, preprocess=True, config=r'--oem 3 --psm 6')
+        )
+        layout_text = clean_ocr_text(extract_layout_text_from_image(file_path))
+        table_text = clean_ocr_text(extract_table_text_from_image(file_path))
+
+        text_candidates = [text for text in [default_text, enhanced_text, layout_text, table_text] if text.strip()]
+        if not text_candidates:
+            return []
+
+        merged_text = '\n'.join(dict.fromkeys(text_candidates))
+        fmt = detect_format(merged_text)
+
+        parsed_candidates = []
+        for text in dict.fromkeys(text_candidates + [merged_text]):
+            if fmt == 'A':
+                parsed = parse_format_a(text)
+            elif fmt == 'B':
+                parsed = parse_format_b(text)
+            else:
+                parsed = parse_format_c(text, layout_text=layout_text or text)
+            parsed_candidates.append(parsed)
+
+        challan = parsed_candidates[0]
+        for candidate in parsed_candidates[1:]:
+            challan = _merge_extracted_challans(challan, candidate)
+        challan = _postprocess_image_challan(challan, parsed_candidates)
+
+        if table_text:
+            if fmt == 'A':
+                challan['table'] = parse_table_format_a(table_text)
+            elif fmt == 'B':
+                challan['table'] = parse_table_format_b(table_text)
+            else:
+                parsed_table = parse_table_format_c(table_text)
+                if len(parsed_table) > len(challan.get('table', [])):
+                    challan['table'] = parsed_table
+
+        return [challan]
+    else:
+        raise ValueError(f"Unsupported file type: {file_ext}. Supported types: .pdf, .jpg, .jpeg, .png")

@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "D:\formautofill\test_extract.py", line 6, in <module>
+    with open('final_output.txt', 'w', encoding='utf-8') as f:
+         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'final_output.txt'
