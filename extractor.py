@@ -7,14 +7,6 @@ from pytesseract import Output
 from PIL import Image, ImageEnhance, ImageFilter
 from typing import List, Dict, Any
 
-try:
-    import easyocr
-except ImportError:
-    easyocr = None
-
-
-_EASYOCR_READER = None
-
 
 def _preprocess_image(image: Image.Image) -> Image.Image:
     """Enhance image quality before OCR: grayscale, contrast, sharpness, upscale."""
@@ -46,58 +38,6 @@ def _ensure_tesseract_path() -> None:
 def _ocr_image(image: Image.Image, config: str = '') -> str:
     _ensure_tesseract_path()
     return pytesseract.image_to_string(image, config=config)
-
-
-def _get_easyocr_reader():
-    global _EASYOCR_READER
-    if easyocr is None:
-        return None
-    if _EASYOCR_READER is None:
-        _EASYOCR_READER = easyocr.Reader(['en'], gpu=False, verbose=False)
-    return _EASYOCR_READER
-
-
-def extract_text_from_image_easyocr(image_path: str) -> str:
-    """Fallback OCR using EasyOCR for difficult image scans."""
-    try:
-        reader = _get_easyocr_reader()
-        if reader is None:
-            return ""
-
-        image = _preprocess_image(Image.open(image_path))
-        results = reader.readtext(image_path, detail=1, paragraph=False)
-        if not results:
-            return ""
-
-        line_buckets = []
-        for box, text, confidence in results:
-            cleaned = str(text or '').strip()
-            if not cleaned:
-                continue
-
-            top = min(point[1] for point in box)
-            left = min(point[0] for point in box)
-            matched_bucket = None
-            for bucket in line_buckets:
-                if abs(bucket['top'] - top) <= 24:
-                    matched_bucket = bucket
-                    break
-
-            if matched_bucket is None:
-                matched_bucket = {'top': top, 'items': []}
-                line_buckets.append(matched_bucket)
-
-            matched_bucket['items'].append((left, cleaned))
-
-        rendered_lines = []
-        for bucket in sorted(line_buckets, key=lambda item: item['top']):
-            parts = [text for _, text in sorted(bucket['items'], key=lambda item: item[0])]
-            if parts:
-                rendered_lines.append(' '.join(parts))
-
-        return '\n'.join(rendered_lines)
-    except Exception:
-        return ""
 
 
 def extract_layout_text_from_image(image_path: str) -> str:
@@ -529,6 +469,42 @@ def _clear_delivery_identity_fields(challan: Dict[str, Any]) -> None:
     challan['delivery_at'] = ""
 
 
+def _build_mill_challan_entities(challan: Dict[str, Any]) -> None:
+    gstin_map = challan.get('gstin_map', {}) or {}
+    party_name = challan.get('party', '') or ""
+    weaver_name = challan.get('weaver', '') or ""
+    firm_name = challan.get('firm', '') or 'JAI MATA DI FASHIONS PVT. LTD.'
+
+    challan['party_obj'] = {
+        "name": party_name,
+        "address": challan.get('party_address', '') or "",
+        "gstin_no": gstin_map.get(party_name, challan.get('gstin_no', '') or ""),
+        "pan_no": challan.get('pan_no', '') or "",
+    }
+    challan['weaver_obj'] = {
+        "name": weaver_name,
+        "address": "",
+        "gstin_no": gstin_map.get(weaver_name, ""),
+        "pan_no": "",
+    }
+    challan['firm_obj'] = {
+        "name": firm_name,
+        "address": "",
+        "gstin_no": gstin_map.get(firm_name, ""),
+        "pan_no": "",
+    }
+
+
+def _clear_mill_identity_fields(challan: Dict[str, Any]) -> None:
+    challan['party'] = ""
+    challan['party_address'] = ""
+    challan['firm'] = ""
+    challan['gstin_no'] = ""
+    challan['pan_no'] = ""
+    challan['gstin_map'] = {}
+    challan['weaver'] = ""
+
+
 def clean_ocr_text(text: str) -> str:
     """Clean and normalize OCR text to fix common errors."""
     # Replace common OCR misreadings
@@ -756,12 +732,49 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
 
     # All GSTINs — search decoded text (handles quadrupled encoding) + raw (catches plain ones)
     all_gstins = extract_all_gstins(decoded) or extract_all_gstins(raw_text)
-    c['gstin_no'] = all_gstins[0] if all_gstins else ""
+
+    supplier_section = decoded
+    supplier_split = re.split(r'JOB\s+ISSUE\s+DELIVERY\s+CHALLAN', decoded, maxsplit=1, flags=re.IGNORECASE)
+    if supplier_split:
+        supplier_section = supplier_split[0]
+    supplier_gstins = extract_all_gstins(supplier_section)
+
+    firm_gstin = ""
+    firm_match = re.search(
+        r'TO[,\s]+JAI\s+MATA\s+DI\s+FASHIONS\s+PVT\.?\s*LTD.*?GSTIN[:\s]+([A-Z0-9]{13,16})',
+        decoded,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if firm_match:
+        firm_gstin = re.sub(r'[^A-Z0-9]', '', firm_match.group(1).upper())
+    elif len(all_gstins) == 1:
+        firm_gstin = all_gstins[0]
+
+    supplier_gstin = ""
+    if supplier_gstins:
+        supplier_gstin = supplier_gstins[0]
+    elif len(all_gstins) > 1:
+        for gstin in all_gstins:
+            if gstin != firm_gstin:
+                supplier_gstin = gstin
+                break
+
+    c['gstin_no'] = supplier_gstin or ""
 
     # PAN No (format: 5 letters + 4 digits + 1 letter = 10 chars)
     pan_m = re.search(r'PAN\s*NO[:\s]+([A-Z]{5}[0-9]{4}[A-Z])', decoded, re.IGNORECASE)
     if pan_m:
         c['pan_no'] = pan_m.group(1).upper()
+
+    if not supplier_gstin and c['pan_no']:
+        supplier_gstin_m = re.search(
+            r'GSTIN[:\s]*([0-9]{2})\S{10}([A-Z0-9]{3})',
+            supplier_section,
+            re.IGNORECASE,
+        )
+        if supplier_gstin_m:
+            supplier_gstin = f"{supplier_gstin_m.group(1)}{c['pan_no']}{supplier_gstin_m.group(2)}"
+            c['gstin_no'] = supplier_gstin
 
     # Challan number
     ch_m = re.search(r'CHALLAN\s+NO[.:\s]+([\w/\-]+)', decoded, re.IGNORECASE)
@@ -835,15 +848,22 @@ def parse_format_a(raw_text: str) -> Dict[str, Any]:
 
     # Build gstin_map: firm name → GSTIN
     gstin_map = {}
-    firm_order = [c['party'], c['firm'], sub_party]
-    for i, name in enumerate(firm_order):
-        if name and i < len(all_gstins):
-            gstin_map[name] = all_gstins[i]
+    if c['party'] and supplier_gstin:
+        gstin_map[c['party']] = supplier_gstin
+    if c['firm'] and firm_gstin:
+        gstin_map[c['firm']] = firm_gstin
+
+    remaining_gstins = [
+        gstin for gstin in all_gstins
+        if gstin and gstin not in {supplier_gstin, firm_gstin}
+    ]
+    if sub_party and remaining_gstins:
+        gstin_map[sub_party] = remaining_gstins[0]
     c['gstin_map'] = gstin_map
 
-    weaver_gstin = gstin_map.get(c['party'], all_gstins[0] if all_gstins else "")
-    firm_gstin = gstin_map.get(c['firm'], all_gstins[1] if len(all_gstins) > 1 else "")
-    party_gstin = gstin_map.get(sub_party, all_gstins[2] if len(all_gstins) > 2 else "")
+    weaver_gstin = gstin_map.get(c['party'], "")
+    firm_gstin = gstin_map.get(c['firm'], "")
+    party_gstin = gstin_map.get(sub_party, "")
     _build_format_a_delivery_entities(
         c,
         weaver_name=c['party'],
@@ -1042,6 +1062,8 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
     if c['firm'] and firm_gstin:
         gstin_map[c['firm']] = firm_gstin
     c['gstin_map'] = gstin_map
+    _build_mill_challan_entities(c)
+    _clear_mill_identity_fields(c)
 
     c['table'] = parse_table_format_b(text)
     return c
@@ -1279,12 +1301,11 @@ def extract_challans(file_path: str) -> List[Dict[str, Any]]:
             extract_text_from_image(file_path, preprocess=True, config=r'--oem 3 --psm 6')
         )
         psm4_text = clean_ocr_text(extract_text_from_image_with_psm(file_path, 4))
-        easyocr_text = clean_ocr_text(extract_text_from_image_easyocr(file_path))
         layout_text = clean_ocr_text(extract_layout_text_from_image(file_path))
         table_text = clean_ocr_text(extract_table_text_from_image(file_path))
 
         text_candidates = [
-            text for text in [default_text, enhanced_text, psm4_text, easyocr_text, layout_text, table_text]
+            text for text in [default_text, enhanced_text, psm4_text, layout_text, table_text]
             if text.strip()
         ]
         if not text_candidates:
