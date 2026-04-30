@@ -187,6 +187,72 @@ def _postprocess_image_challan(challan: Dict[str, Any], candidates: List[Dict[st
     return result
 
 
+def _empty_entity_obj() -> Dict[str, str]:
+    return {
+        "name": "",
+        "address": "",
+        "gstin_no": "",
+        "pan_no": "",
+    }
+
+
+def _normalize_entity_name(value: str) -> str:
+    return re.sub(r'[^A-Z0-9]', '', str(value or '').upper())
+
+
+def _lookup_gstin_for_name(gstin_map: Dict[str, str], *candidate_names: str) -> str:
+    normalized_map = {
+        _normalize_entity_name(name): gstin
+        for name, gstin in (gstin_map or {}).items()
+        if name and gstin
+    }
+
+    for candidate in candidate_names:
+        normalized_candidate = _normalize_entity_name(candidate)
+        if normalized_candidate and normalized_candidate in normalized_map:
+            return normalized_map[normalized_candidate]
+
+    return ""
+
+
+def _build_delivery_challan_entities(challan: Dict[str, Any]) -> None:
+    gstin_map = challan.get('gstin_map', {}) or {}
+
+    weaver_name = challan.get('party', '')
+    party_name = challan.get('ms_party', '')
+    firm_name = challan.get('firm', '') or 'JAI MATA DI FASHIONS PVT. LTD.'
+    delivery_name = challan.get('delivery_at', '')
+
+    challan['weaver_obj'] = {
+        "name": weaver_name or "",
+        "address": challan.get('party_address', '') or "",
+        "gstin_no": _lookup_gstin_for_name(gstin_map, weaver_name) or challan.get('gstin_no', '') or "",
+        "pan_no": challan.get('pan_no', '') or "",
+    }
+
+    challan['party_obj'] = {
+        "name": party_name or "",
+        "address": "",
+        "gstin_no": _lookup_gstin_for_name(gstin_map, party_name),
+        "pan_no": "",
+    }
+
+    challan['firm_obj'] = {
+        "name": firm_name,
+        "address": "",
+        "gstin_no": (
+            _lookup_gstin_for_name(
+                gstin_map,
+                delivery_name,
+                firm_name,
+                'JAI MATA DI FASHIONS PVT. LTD.',
+                'JAI MATADI FASHIONS PVT. LTD.',
+            )
+        ),
+        "pan_no": "",
+    }
+
+
 def clean_ocr_text(text: str) -> str:
     """Clean and normalize OCR text to fix common errors."""
     # Replace common OCR misreadings
@@ -308,6 +374,9 @@ def empty_challan() -> Dict[str, Any]:
         "pu_bill_no": "",
         "ms_party": "",
         "delivery_at": "",
+        "weaver_obj": _empty_entity_obj(),
+        "party_obj": _empty_entity_obj(),
+        "firm_obj": _empty_entity_obj(),
         "table": []
     }
 
@@ -609,9 +678,25 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
         addr_parts.append(stripped)
     c['party_address'] = ' '.join(addr_parts)
 
-    # All GSTINs
+    # Prefer label-aware GST extraction for mill challans so party/firm GSTs do not get swapped.
+    party_gstin = ""
+    firm_gstin = ""
+
+    party_gstin_m = re.search(r'GSTIN(?:/UIN)?\s*(?:NO\.?)?\s*[:\-]+\s*([A-Z0-9]{13,16})', text, re.IGNORECASE)
+    if party_gstin_m:
+        party_gstin = re.sub(r'[^A-Z0-9]', '', party_gstin_m.group(1).upper())
+
+    firm_gstin_m = re.search(r'\bGST\s*:\s*([A-Z0-9]{13,16})', text, re.IGNORECASE)
+    if firm_gstin_m:
+        firm_gstin = re.sub(r'[^A-Z0-9]', '', firm_gstin_m.group(1).upper())
+
     all_gstins = extract_all_gstins(text)
-    c['gstin_no'] = all_gstins[0] if all_gstins else ""
+    if not party_gstin and all_gstins:
+        party_gstin = all_gstins[0]
+    if not firm_gstin and len(all_gstins) > 1:
+        firm_gstin = all_gstins[1]
+
+    c['gstin_no'] = party_gstin or ""
 
     # PAN No
     pan_m = re.search(r'PAN\s*NO[:\s]+([A-Z]{5}[0-9]{4}[A-Z])', text, re.IGNORECASE)
@@ -657,12 +742,12 @@ def parse_format_b(raw_text: str) -> Dict[str, Any]:
     if tm_m:
         c['meter'] = to_float(tm_m.group(1))
 
-    # Build gstin_map: party → gstin[0], firm (consignee) → gstin[1]
+    # Build gstin_map using label-aware GST extraction when available.
     gstin_map = {}
-    if c['party'] and all_gstins:
-        gstin_map[c['party']] = all_gstins[0]
-    if c['firm'] and len(all_gstins) > 1:
-        gstin_map[c['firm']] = all_gstins[1]
+    if c['party'] and party_gstin:
+        gstin_map[c['party']] = party_gstin
+    if c['firm'] and firm_gstin:
+        gstin_map[c['firm']] = firm_gstin
     c['gstin_map'] = gstin_map
 
     c['table'] = parse_table_format_b(text)
@@ -691,6 +776,7 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
             c['party'] = line
             party_index = idx
             break
+    c['weaver'] = c['party']
 
     addr_parts = []
     for line in lines[party_index + 1:party_index + 5]:
@@ -837,6 +923,7 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
         if name and i < len(all_gstins):
             gstin_map[name] = all_gstins[i]
     c['gstin_map'] = gstin_map
+    _build_delivery_challan_entities(c)
 
     c['table'] = parse_table_format_c(raw_text)
     return c
