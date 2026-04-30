@@ -1,5 +1,6 @@
 import re
 import os
+import shutil
 import pdfplumber
 import pytesseract
 from pytesseract import Output
@@ -19,9 +20,19 @@ def _preprocess_image(image: Image.Image) -> Image.Image:
 
 
 def _ensure_tesseract_path() -> None:
-    tesseract_path = r'C:\Program Files\Tesseract-OCR'
-    if tesseract_path not in os.environ.get('PATH', ''):
-        os.environ['PATH'] = tesseract_path + os.pathsep + os.environ.get('PATH', '')
+    env_cmd = os.environ.get('TESSERACT_CMD', '').strip()
+    if env_cmd:
+        pytesseract.pytesseract.tesseract_cmd = env_cmd
+        return
+
+    system_tesseract = shutil.which('tesseract')
+    if system_tesseract:
+        pytesseract.pytesseract.tesseract_cmd = system_tesseract
+        return
+
+    windows_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    if os.path.exists(windows_cmd):
+        pytesseract.pytesseract.tesseract_cmd = windows_cmd
 
 
 def _ocr_image(image: Image.Image, config: str = '') -> str:
