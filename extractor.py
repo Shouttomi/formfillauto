@@ -1,120 +1,204 @@
 import re
 import os
-import shutil
+import io
+import tempfile
 import pdfplumber
-import pytesseract
-from pytesseract import Output
-from PIL import Image, ImageEnhance, ImageFilter
+from llama_cloud import LlamaCloud
+from PIL import Image, ImageEnhance
 from typing import List, Dict, Any
 
 
+LLAMA_PARSE_TIER = os.environ.get("LLAMA_PARSE_TIER", "agentic").strip() or "agentic"
+LLAMA_PARSE_VERSION = os.environ.get("LLAMA_PARSE_VERSION", "latest").strip() or "latest"
+_LLAMA_CLIENT: LlamaCloud | None = None
+
+LLAMA_EXTRACT_CHALLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "challan_type": {"type": "string"},
+        "challan_no": {"type": "string"},
+        "date": {"type": "string"},
+        "quality": {"type": "string"},
+        "party_name": {"type": "string"},
+        "weaver_name": {"type": "string"},
+        "firm_name": {"type": "string"},
+        "party_gstin": {"type": "string"},
+        "weaver_gstin": {"type": "string"},
+        "firm_gstin": {"type": "string"},
+        "total_taka": {"type": "number"},
+        "total_meter": {"type": "number"},
+        "broker": {"type": "string"},
+        "remark": {"type": "string"},
+        "table": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "srl_no": {"type": "number"},
+                    "tn": {"type": "number"},
+                    "meter": {"type": "number"},
+                },
+            },
+        },
+    },
+}
+
+LLAMA_EXTRACT_SYSTEM_PROMPT = (
+    "Extract challan fields exactly from the document. "
+    "For delivery challans, party_name is the top 'M/s. Party' customer block, "
+    "weaver_name is the top-left supplier/manufacturer block, and firm_name is the delivery destination firm "
+    "(usually JAI MATA DI FASHIONS PVT. LTD.). "
+    "Preserve table rows exactly as printed and do not invent missing values."
+)
+
+
 def _preprocess_image(image: Image.Image) -> Image.Image:
-    """Enhance image quality before OCR: grayscale, contrast, sharpness, upscale."""
+    """Enhance image quality before OCR without creating oversized uploads."""
     image = image.convert('L')
-    if image.width < 1800:
-        scale = 1800 / image.width
+    if image.width > 1600:
+        scale = 1600 / image.width
         image = image.resize((int(image.width * scale), int(image.height * scale)), Image.LANCZOS)
     image = ImageEnhance.Contrast(image).enhance(2.0)
     image = ImageEnhance.Sharpness(image).enhance(2.0)
     return image
 
 
-def _ensure_tesseract_path() -> None:
-    env_cmd = os.environ.get('TESSERACT_CMD', '').strip()
-    if env_cmd:
-        pytesseract.pytesseract.tesseract_cmd = env_cmd
-        return
-
-    system_tesseract = shutil.which('tesseract')
-    if system_tesseract:
-        pytesseract.pytesseract.tesseract_cmd = system_tesseract
-        return
-
-    windows_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-    if os.path.exists(windows_cmd):
-        pytesseract.pytesseract.tesseract_cmd = windows_cmd
+def _get_llama_client() -> LlamaCloud:
+    global _LLAMA_CLIENT
+    if _LLAMA_CLIENT is None:
+        _LLAMA_CLIENT = LlamaCloud()
+    return _LLAMA_CLIENT
 
 
-def _ocr_image(image: Image.Image, config: str = '') -> str:
-    _ensure_tesseract_path()
-    return pytesseract.image_to_string(image, config=config)
+def _image_to_bytes(image: Image.Image) -> tuple[bytes, str]:
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, format="JPEG", quality=85, optimize=True)
+    return buffer.getvalue(), "image/jpeg"
 
 
-def extract_layout_text_from_image(image_path: str) -> str:
-    """Rebuild OCR output into line-oriented text using tesseract word positions."""
+def _normalize_llama_extract_result(extract_result: Any) -> Dict[str, Any]:
+    if extract_result is None:
+        return {}
+    if isinstance(extract_result, dict):
+        return extract_result
+    if isinstance(extract_result, list):
+        return extract_result[0] if extract_result and isinstance(extract_result[0], dict) else {}
+    if hasattr(extract_result, "model_dump"):
+        data = extract_result.model_dump()
+        if isinstance(data, list):
+            return data[0] if data and isinstance(data[0], dict) else {}
+        return data if isinstance(data, dict) else {}
+    if hasattr(extract_result, "data"):
+        return _normalize_llama_extract_result(extract_result.data)
+    return {}
+
+
+def _extract_structured_challan_from_file(file_path: str) -> Dict[str, Any]:
+    client = _get_llama_client()
     try:
-        image = _preprocess_image(Image.open(image_path))
-        _ensure_tesseract_path()
-        data = pytesseract.image_to_data(image, output_type=Output.DICT, config=r'--oem 3 --psm 6')
-
-        lines = {}
-        n = len(data.get('text', []))
-        for i in range(n):
-            word = (data['text'][i] or '').strip()
-            if not word:
-                continue
-            conf = str(data.get('conf', [''])[i]).strip()
-            try:
-                if conf and float(conf) < 0:
-                    continue
-            except ValueError:
-                pass
-
-            key = (data['block_num'][i], data['par_num'][i], data['line_num'][i])
-            lines.setdefault(key, []).append({
-                'left': int(data['left'][i]),
-                'width': int(data['width'][i]),
-                'text': word,
-            })
-
-        rendered_lines = []
-        for key in sorted(lines.keys()):
-            words = sorted(lines[key], key=lambda item: item['left'])
-            if not words:
-                continue
-
-            parts = []
-            prev_right = None
-            for word in words:
-                if prev_right is not None:
-                    gap = max(1, int((word['left'] - prev_right) / 28))
-                    parts.append(' ' * min(gap, 8))
-                parts.append(word['text'])
-                prev_right = word['left'] + word['width']
-
-            rendered_lines.append(''.join(parts).strip())
-
-        return '\n'.join(rendered_lines)
-    except Exception:
-        return ""
-
-
-def extract_table_text_from_image(image_path: str) -> str:
-    """Extract text from image specifically optimized for blurry table numbers."""
-    try:
-        image = _preprocess_image(Image.open(image_path))
-        # Use psm 6 (single block) to maximize number extraction in blurry regions
-        text = _ocr_image(image, config=r'--oem 3 --psm 6')
-        return text
-    except Exception:
-        return ""
-
-
-def extract_text_from_image(image_path: str, preprocess: bool = False, config: str = '') -> str:
-    """Extract text from JPEG/PNG using Tesseract OCR (default layout)."""
-    try:
-        image = Image.open(image_path)
-        if preprocess:
-            image = _preprocess_image(image)
-        text = _ocr_image(image, config=config)
-        return text
+        file_obj = client.files.create(file=file_path, purpose="extract")
+        job = client.extract.create(
+            file_input=file_obj.id,
+            configuration={
+                "data_schema": LLAMA_EXTRACT_CHALLAN_SCHEMA,
+                "extraction_target": "per_doc",
+                "tier": "agentic",
+                "system_prompt": LLAMA_EXTRACT_SYSTEM_PROMPT,
+            },
+        )
+        while job.status not in ("COMPLETED", "FAILED", "CANCELLED"):
+            job = client.extract.get(job.id)
     except Exception as e:
-        raise ValueError(f"Failed to extract text from image: {str(e)}")
+        raise ValueError(f"Llama Extract request failed: {str(e)}")
+
+    if job.status != "COMPLETED":
+        raise ValueError(f"Llama Extract job ended with status: {job.status}")
+    return _normalize_llama_extract_result(job.extract_result)
 
 
-def extract_text_from_image_with_psm(image_path: str, psm: int) -> str:
-    """Extract OCR text from image using a specific page segmentation mode."""
-    return extract_text_from_image(image_path, preprocess=True, config=f'--oem 3 --psm {psm}')
+def _map_llama_extract_to_challan(extracted: Dict[str, Any]) -> Dict[str, Any]:
+    challan = empty_challan()
+    challan_type = str(extracted.get("challan_type", "") or "").upper()
+    challan["challan_no"] = str(extracted.get("challan_no", "") or "").strip()
+    date_val = str(extracted.get("date", "") or "").strip().replace("-", "/")
+    challan["date"] = date_val
+    challan["challan_date"] = date_val
+    challan["quality"] = str(extracted.get("quality", "") or "").strip()
+    challan["agent"] = str(extracted.get("broker", "") or "").strip()
+    challan["remark"] = str(extracted.get("remark", "") or "").strip()
+    challan["taka"] = int(float(extracted.get("total_taka", 0) or 0)) if extracted.get("total_taka") not in (None, "") else 0
+    challan["meter"] = to_float(extracted.get("total_meter", 0) or 0)
+
+    party_name = str(extracted.get("party_name", "") or "").strip()
+    weaver_name = str(extracted.get("weaver_name", "") or "").strip()
+    firm_name = str(extracted.get("firm_name", "") or "").strip()
+    party_gstin = str(extracted.get("party_gstin", "") or "").strip()
+    weaver_gstin = str(extracted.get("weaver_gstin", "") or "").strip()
+    firm_gstin = str(extracted.get("firm_gstin", "") or "").strip()
+
+    if "DELIVERY" in challan_type or firm_name or weaver_name:
+        challan["weaver_obj"] = {
+            "name": weaver_name,
+            "address": "",
+            "gstin_no": weaver_gstin,
+            "pan_no": "",
+        }
+        challan["party_obj"] = {
+            "name": party_name,
+            "address": "",
+            "gstin_no": party_gstin,
+            "pan_no": "",
+        }
+        normalized_firm = firm_name
+        if re.search(r'JAI\s*MATA', normalized_firm, re.IGNORECASE):
+            normalized_firm = "JAI MATA DI FASHIONS PVT. LTD."
+        if normalized_firm and normalized_firm.upper() == (weaver_name or "").upper():
+            normalized_firm = "JAI MATA DI FASHIONS PVT. LTD."
+        challan["firm_obj"] = {
+            "name": normalized_firm or "JAI MATA DI FASHIONS PVT. LTD.",
+            "address": "",
+            "gstin_no": firm_gstin,
+            "pan_no": "",
+        }
+    else:
+        challan["party_obj"] = {
+            "name": party_name,
+            "address": "",
+            "gstin_no": party_gstin,
+            "pan_no": "",
+        }
+        challan["weaver_obj"] = {
+            "name": weaver_name,
+            "address": "",
+            "gstin_no": weaver_gstin,
+            "pan_no": "",
+        }
+        challan["firm_obj"] = {
+            "name": firm_name or "JAI MATA DI FASHIONS PVT. LTD.",
+            "address": "",
+            "gstin_no": firm_gstin,
+            "pan_no": "",
+        }
+
+    table_rows = []
+    for row in extracted.get("table", []) or []:
+        try:
+            sr = int(float(row.get("srl_no", 0) or 0))
+            tn = int(float(row.get("tn", 0) or 0))
+            meter = to_float(row.get("meter", 0) or 0)
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if sr <= 0 or meter <= 0:
+            continue
+        table_rows.append({"srl_no": sr, "tn": tn, "meter": meter})
+    challan["table"] = table_rows
+
+    if not challan["taka"] and table_rows:
+        challan["taka"] = len(table_rows)
+    if not challan["meter"] and table_rows:
+        challan["meter"] = round(sum(row["meter"] for row in table_rows), 2)
+
+    return challan
 
 
 def _merge_extracted_challans(primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
@@ -965,6 +1049,90 @@ def parse_table_format_c(text: str) -> List[Dict]:
     )
 
 
+def _looks_like_delivery_party_value(value: str) -> bool:
+    value = str(value or '').strip(' |:-')
+    if not value or len(value) < 3:
+        return False
+    upper = value.upper()
+    if re.search(r'DELIVERY|CHALLAN|DATE|QUALITY|BROC?KER|GSTIN|METER|TAKA|SRL?\.?\s*NO', upper):
+        return False
+    return bool(re.search(r'[A-Z]{3,}', upper))
+
+
+def _extract_delivery_header_fields(raw_text: str, layout_text: str = '') -> Dict[str, str]:
+    combined_text = layout_text or raw_text
+    lines = [line.rstrip() for line in combined_text.split('\n') if line.strip()]
+    result = {
+        'party_name': '',
+        'delivery_at': '',
+        'quality': '',
+        'date': '',
+    }
+
+    for i, line in enumerate(lines):
+        if re.search(r'M/s\.?\s*Party.*Delivery\s+At', line, re.IGNORECASE):
+            line_date_match = re.search(r'Date\s*[: ]\s*[/|\\-]*\s*([0-3]?\d[-/][01]?\d[-/](?:20)?\d{2,4}|\b20\d{2}\b)', line, re.IGNORECASE)
+            if line_date_match:
+                result['date'] = line_date_match.group(1).replace('-', '/')
+
+            for candidate_line in lines[i + 1:i + 5]:
+                if re.search(r'GSTIN|Srl?\.?\s*No|Taka\s*No|Total\s+Taka|Remark', candidate_line, re.IGNORECASE):
+                    break
+
+                columns = [col.strip(' |:-') for col in re.split(r'\s{2,}', candidate_line) if col.strip()]
+                if not columns:
+                    continue
+
+                if not result['party_name'] and _looks_like_delivery_party_value(columns[0]):
+                    result['party_name'] = columns[0]
+
+                if not result['delivery_at']:
+                    for col in columns[1:]:
+                        if re.search(r'JAI\s*MATA|FASHIONS?\s*PVT', col, re.IGNORECASE):
+                            result['delivery_at'] = col.strip()
+                            break
+
+                if not result['date']:
+                    date_match = re.search(r'[/|\\-]*\s*([0-3]?\d[-/][01]?\d[-/](?:20)?\d{2,4}|\b20\d{2}\b)', candidate_line)
+                    if date_match:
+                        result['date'] = date_match.group(1).replace('-', '/')
+
+                if not result['quality']:
+                    quality_match = re.search(r'Quality\s*[:\s]+([A-Z0-9 ./_-]{3,40})', candidate_line, re.IGNORECASE)
+                    if not quality_match:
+                        quality_match = re.search(r'Qlty\s*[: ]?\s*([A-Z0-9 ./_-]{3,40})', candidate_line, re.IGNORECASE)
+                    if quality_match:
+                        result['quality'] = quality_match.group(1).strip(' |:-')
+                    elif len(columns) >= 3 and _looks_like_delivery_party_value(columns[-1]):
+                        result['quality'] = columns[-1].strip()
+                    elif re.search(r'Quality', line, re.IGNORECASE) and len(columns) >= 3:
+                        result['quality'] = columns[-1].strip()
+            break
+
+    if not result['party_name']:
+        party_match = re.search(
+            r'(?:M/s\.?\s*Party|M/s\.?)\s*[: ]\s*([A-Z0-9&.,/() \-]{3,80})',
+            raw_text,
+            re.IGNORECASE
+        )
+        if party_match:
+            candidate = re.split(r'\s{2,}|DELIVERY\s+AT|CHALLAN\s+NO|DATE|QUALITY', party_match.group(1), flags=re.IGNORECASE)[0]
+            candidate = candidate.strip(' |:-')
+            if _looks_like_delivery_party_value(candidate):
+                result['party_name'] = candidate
+
+    if not result['delivery_at']:
+        delivery_match = re.search(
+            r'(JAI\s*MATA(?:DI)?\s*FASHIONS?\s*PVT\.?\s*LTD\.?(?:\s*\(UNIT-?\d+\))?)',
+            combined_text,
+            re.IGNORECASE
+        )
+        if delivery_match:
+            result['delivery_at'] = delivery_match.group(1).strip(' |:-')
+
+    return result
+
+
 def parse_format_b(raw_text: str) -> Dict[str, Any]:
     """Parse Mill Challan (SUDARSHAN GARMENTS style — plain text, printed twice per page)."""
     c = empty_challan()
@@ -1073,6 +1241,7 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
     """Parse Delivery Challan (DHARMIL TEXTILES / SHREEJI style — Srl.No./Taka No./Meter table)."""
     c = empty_challan()
     lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+    header_fields = _extract_delivery_header_fields(raw_text, layout_text)
 
     c['party'] = lines[0] if lines else ''
     party_index = 0
@@ -1154,6 +1323,8 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
         q_m = re.search(r'Quality\s*[:\s]+([^\n]+)', raw_text, re.IGNORECASE)
     if q_m:
         c['quality'] = q_m.group(1).strip()
+    if header_fields.get('quality') and _looks_like_noisy_quality(c.get('quality', '')):
+        c['quality'] = header_fields['quality']
 
     c['hsn_code'] = extract_hsn(raw_text)
 
@@ -1231,6 +1402,12 @@ def parse_format_c(raw_text: str, layout_text: str = '') -> Dict[str, Any]:
             c['ms_party'] = c['ms_party'] or party_block.group(1).strip(' |:-')
             c['delivery_at'] = c['delivery_at'] or party_block.group(2).strip(' |:-')
 
+    c['ms_party'] = c['ms_party'] or header_fields.get('party_name', '')
+    c['delivery_at'] = c['delivery_at'] or header_fields.get('delivery_at', '')
+    if header_fields.get('date') and not c.get('date'):
+        c['date'] = header_fields['date']
+        c['challan_date'] = header_fields['date']
+
     # Build gstin_map after ms_party/delivery_at are set by layout parsing above
     gstin_map = {}
     firm_order = [c['party'], c['ms_party'], c['delivery_at']]
@@ -1259,6 +1436,40 @@ def detect_format(text: str) -> str:
     return 'A'
 
 
+def _parse_challan_from_text(fmt: str, text: str, layout_text: str = '') -> Dict[str, Any]:
+    if fmt == 'A':
+        return parse_format_a(text)
+    if fmt == 'B':
+        return parse_format_b(text)
+    return parse_format_c(text, layout_text or text)
+
+
+def _should_ocr_pdf_page(text: str, challan: Dict[str, Any]) -> bool:
+    compact_text = re.sub(r'\s+', '', text or '')
+    if len(compact_text) < 40:
+        return True
+
+    return not any([
+        str(challan.get('challan_no', '')).strip(),
+        str(challan.get('party', '')).strip(),
+        challan.get('table'),
+    ])
+
+
+def _extract_challan_from_ocr_image(image: Image.Image) -> Dict[str, Any]:
+    content_bytes, _mime_type = _image_to_bytes(_preprocess_image(image))
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp.write(content_bytes)
+        tmp_path = tmp.name
+
+    try:
+        extracted = _extract_structured_challan_from_file(tmp_path)
+        return _map_llama_extract_to_challan(extracted)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 def extract_challans_from_pdf(pdf_path: str) -> List[Dict[str, Any]]:
     challans = []
     seen = set()
@@ -1266,17 +1477,23 @@ def extract_challans_from_pdf(pdf_path: str) -> List[Dict[str, Any]]:
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text() or ''
-            if not text.strip():
-                continue
+            layout_text = page.extract_text(layout=True) or ''
 
-            fmt = detect_format(text)
-            if fmt == 'A':
-                challan = parse_format_a(text)
-            elif fmt == 'B':
-                challan = parse_format_b(text)
-            else:
-                layout_text = page.extract_text(layout=True) or ''
-                challan = parse_format_c(text, layout_text)
+            challan = {}
+            if text.strip():
+                fmt = detect_format(text)
+                challan = _parse_challan_from_text(fmt, text, layout_text=layout_text)
+
+            if not challan or _should_ocr_pdf_page(text, challan):
+                page_image = page.to_image(resolution=200).original
+                ocr_challan = _extract_challan_from_ocr_image(page_image)
+                if challan:
+                    challan = _merge_extracted_challans(challan, ocr_challan)
+                else:
+                    challan = ocr_challan
+
+            if not challan:
+                continue
 
             cn = challan.get('challan_no', '')
             if cn and cn in seen:
@@ -1296,53 +1513,7 @@ def extract_challans(file_path: str) -> List[Dict[str, Any]]:
     if file_ext == '.pdf':
         return extract_challans_from_pdf(file_path)
     elif file_ext in ['.jpg', '.jpeg', '.png']:
-        default_text = clean_ocr_text(extract_text_from_image(file_path))
-        enhanced_text = clean_ocr_text(
-            extract_text_from_image(file_path, preprocess=True, config=r'--oem 3 --psm 6')
-        )
-        psm4_text = clean_ocr_text(extract_text_from_image_with_psm(file_path, 4))
-        layout_text = clean_ocr_text(extract_layout_text_from_image(file_path))
-        table_text = clean_ocr_text(extract_table_text_from_image(file_path))
-
-        text_candidates = [
-            text for text in [default_text, enhanced_text, psm4_text, layout_text, table_text]
-            if text.strip()
-        ]
-        if not text_candidates:
-            return []
-
-        merged_text = '\n'.join(dict.fromkeys(text_candidates))
-        fmt = detect_format(merged_text)
-
-        parsed_candidates = []
-        for text in dict.fromkeys(text_candidates + [merged_text]):
-            if fmt == 'A':
-                parsed = parse_format_a(text)
-            elif fmt == 'B':
-                parsed = parse_format_b(text)
-            else:
-                parsed = parse_format_c(text, layout_text=layout_text or text)
-            parsed_candidates.append(parsed)
-
-        challan = parsed_candidates[0]
-        for candidate in parsed_candidates[1:]:
-            challan = _merge_extracted_challans(challan, candidate)
-        challan = _postprocess_image_challan(challan, parsed_candidates)
-        if fmt == 'C':
-            challan = _fix_image_delivery_details(challan, merged_text)
-
-        if table_text:
-            if fmt == 'A':
-                challan['table'] = parse_table_format_a(table_text)
-            elif fmt == 'B':
-                challan['table'] = parse_table_format_b(table_text)
-            else:
-                parsed_table = parse_table_format_c(table_text)
-                if len(parsed_table) > len(challan.get('table', [])):
-                    challan['table'] = parsed_table
-        if fmt == 'C':
-            challan = _filter_noisy_image_table_rows(challan)
-
-        return [challan]
+        challan = _extract_challan_from_ocr_image(Image.open(file_path))
+        return [challan] if challan else []
     else:
         raise ValueError(f"Unsupported file type: {file_ext}. Supported types: .pdf, .jpg, .jpeg, .png")

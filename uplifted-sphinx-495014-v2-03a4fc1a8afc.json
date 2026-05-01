@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "uplifted-sphinx-495014-v2",
+  "private_key_id": "03a4fc1a8afc2112515cb1b3ec4432d34aa0a7a6",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDvLdC6aPmIKID7\ntSX7AVi6EfwvBpiNlrRryL0aspjCpeVmHngqrApJpeUe0UtwCt88l0u/ilOcXFCD\nPavdK2sWuTPfghRZ1uTAIDO2A0wFpf6U1OuC1kGbaj3PFAWYr/VTTPsO9uvrvXAu\nYJQGhBWn92cdJP1ut6BYgT+N1uihvKGfzKkuJUIlpS6kCEvn1pZSSKGRxj6hzeMs\nk2XJ6/crH59qT9vL7k748FykJRoRx1EPtSVZd3hYmJn9aMrewaBWAZnZWbBgPHHZ\nxCwE731vJCReE8p76QPrlGKknQLFwaB/plLE0CSzr2OB8isCzGEnAHJ+LnIjDEQM\nc3XCMysTAgMBAAECggEANNFYxTmWVT+gkDVGMGJxPhHnr1jVCntr11uKiyFCg8WP\n3Ze/8KhyUyY77SzJ7HGyL5a3pxI8eYyXSQwu7lX+vZNjhambpeVDObxCvyCGQr8P\n87z7TzbSYSg6gwbIX5oH4n/e90SG/9WjNtKkDbZQc/m5/yEiiDcrxS+xobiCQejR\nMNlw+JuMbjW3qbiuokOr81ROZKL3dXgN/wIT0u6fAEhb0EDRt5rN6FiO8ogeDTwd\noi3raXQjUD2CDtXLCNpgFbGimh1k2XWnHxIDgyDaqYTkNcvucO5LIonN4eI6tBQ6\nUtTBBzLeLdBDjxHejVGAc2y8pxhwN0AnJBih20S3WQKBgQD+qpnhPIAG/3uHH7mp\nZPtgYfhTZvtxqjUrpQNY0dySP0FvSNbACEBjyS2+IeFy+ZCyzGnD3siGq883QQQy\nfotF89dNDoXmL4jC6Ffxml1T6ahtmQrcW+9dFM10huiBECaiC81CKqoV+Sbviyev\nY+4ZcAxIuu6GDKb+tvb38Evr6wKBgQDwbnPDgxTtASxIjBND4uRMhLMnoh9uPsaV\nmfmwz4J8sBdkQecrDr/6iaeoCFo7G4kuwb3H7PpogopR87wYQz+mSxqmKP5HW7QA\nFgt8s8cwFg+hvki871zJd7XKimsCLVdziHr9aSTW1D6dGiJgQLgYIiBbZnP7w+ON\nckmcV/S7eQKBgQCCJAadLsCyUs76n4DOixdXCtnPLTpjvLqNQjdypVRVvFOhHhT4\nb38QP1fL6R6AFf8XEBUgjnHlOFmdf/E4KKjdp52n+Dr/Bd2a1QdUJTF6V1bGI0aE\nk8q/w4i2+tZIVkuX1fYf0RO4ROnb0j4GiEe94h+07ypDgKW6Vx/gVoFF3wKBgAq9\n5I4nnRe5pbDYEURHLsv8YcSziZPzWgv1BSLRIpNPirv/9cQGtK0M2WC4fs+FO2vL\nXB9Chy2EJ4nhydWLq5xSXq5txm6JulEGqxy3K38KfUhMqBNI3mxh3M1fwcgnHnEa\n9+O6ftraQLHkKQUD3zW00J1ExonJBrGbGY7SnyyBAoGBAIAM5Pl8z9IEFopekNgN\nPyMoa9KCUE1SoKQR9D4AfN7NIOzO92y1MHc8FukRd/u08JJZ1GbDtkjMnUs61H1+\nQmJc+iZOSeSlgs9RMvwC8fTSdTZLnZReBxHP428dcAW3JUSsXzagqEdjXgiF8pTz\nnaNz07Vwpc21tU9neQo1EnnW\n-----END PRIVATE KEY-----\n",
+  "client_email": "ocr-testing@uplifted-sphinx-495014-v2.iam.gserviceaccount.com",
+  "client_id": "103203155950584105398",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/ocr-testing%40uplifted-sphinx-495014-v2.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

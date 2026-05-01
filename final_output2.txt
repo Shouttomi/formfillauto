@@ -1,0 +1,16 @@
+party      : 
+challan_no : 
+date       : 2026
+quality    : 
+taka       : 8
+meter      : 947.0
+gstin_no   : 
+table rows : 8
+  {'srl_no': 2, 'tn': 189, 'meter': 193.0}
+  {'srl_no': 3, 'tn': 190, 'meter': 100.0}
+  {'srl_no': 5, 'tn': 154, 'meter': 110.0}
+  {'srl_no': 6, 'tn': 197, 'meter': 96.0}
+  {'srl_no': 7, 'tn': 119, 'meter': 98.0}
+  {'srl_no': 8, 'tn': 155, 'meter': 120.0}
+  {'srl_no': 9, 'tn': 418, 'meter': 120.0}
+  {'srl_no': 10, 'tn': 156, 'meter': 110.0}

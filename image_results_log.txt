@@ -1,0 +1,90 @@
+FILE: PRATIBHAFAB.jpeg
+count: 1
+challan_1:
+challan_no: VS30/26-27
+date: 06/04/2026
+quality: CALLASIC36
+meter: 3121.0
+taka: 30
+party_obj: {'name': 'PRATIBHA FABRICS', 'address': '', 'gstin_no': '27AADHMO859C1ZE', 'pan_no': ''}
+weaver_obj: {'name': 'Vrundavan Textiles', 'address': '', 'gstin_no': '24AALFV5606N1ZP', 'pan_no': ''}
+firm_obj: {'name': 'JAY MATADI FASHION UNIT-2 JOSHI MASTAR', 'address': '', 'gstin_no': '24AALFV5606N1ZP', 'pan_no': ''}
+remark: 
+table_len: 30
+table: [{'srl_no': 1, 'tn': 1132, 'meter': 120.0}, {'srl_no': 2, 'tn': 1133, 'meter': 120.0}, {'srl_no': 3, 'tn': 1134, 'meter': 79.0}, {'srl_no': 4, 'tn': 1135, 'meter': 120.0}, {'srl_no': 5, 'tn': 1136, 'meter': 120.0}, {'srl_no': 6, 'tn': 1137, 'meter': 127.0}, {'srl_no': 7, 'tn': 1138, 'meter': 100.0}, {'srl_no': 8, 'tn': 1139, 'meter': 100.0}, {'srl_no': 9, 'tn': 1140, 'meter': 94.0}, {'srl_no': 10, 'tn': 1141, 'meter': 100.0}, {'srl_no': 11, 'tn': 1142, 'meter': 80.0}, {'srl_no': 12, 'tn': 1143, 'meter': 77.0}, {'srl_no': 13, 'tn': 1144, 'meter': 100.0}, {'srl_no': 14, 'tn': 1145, 'meter': 90.0}, {'srl_no': 15, 'tn': 1146, 'meter': 89.0}, {'srl_no': 16, 'tn': 1147, 'meter': 100.0}, {'srl_no': 17, 'tn': 1148, 'meter': 110.0}, {'srl_no': 18, 'tn': 1149, 'meter': 103.0}, {'srl_no': 19, 'tn': 1150, 'meter': 110.0}, {'srl_no': 20, 'tn': 1151, 'meter': 100.0}, {'srl_no': 21, 'tn': 1152, 'meter': 76.0}, {'srl_no': 22, 'tn': 1153, 'meter': 110.0}, {'srl_no': 23, 'tn': 1154, 'meter': 110.0}, {'srl_no': 24, 'tn': 1155, 'meter': 109.0}, {'srl_no': 25, 'tn': 1156, 'meter': 120.0}, {'srl_no': 26, 'tn': 1157, 'meter': 110.0}, {'srl_no': 27, 'tn': 1158, 'meter': 97.0}, {'srl_no': 28, 'tn': 1159, 'meter': 120.0}, {'srl_no': 29, 'tn': 1160, 'meter': 120.0}, {'srl_no': 30, 'tn': 1161, 'meter': 110.0}]
+--------------------------------------------------------------------------------
+FILE: SARSWATITEXTILES.jpeg
+count: 1
+challan_1:
+challan_no: 30
+date: 06/04/2026
+quality: B S Y-11 KG (42-PANO)
+meter: 1805.0
+taka: 16
+party_obj: {'name': 'M/s. SARSWATI TEXTILE', 'address': '', 'gstin_no': '24AQXPS1393K2ZZ', 'pan_no': ''}
+weaver_obj: {'name': 'TIRUPATI TEXTILES', 'address': '', 'gstin_no': '24BAWPP3090C1ZJ', 'pan_no': ''}
+firm_obj: {'name': 'JAI MATA DI FASHIONS PVT. LTD.', 'address': '', 'gstin_no': '24AABCA9842L1ZG', 'pan_no': ''}
+remark: JOSH MASTER
+table_len: 16
+table: [{'srl_no': 1, 'tn': 267, 'meter': 126.0}, {'srl_no': 2, 'tn': 269, 'meter': 124.5}, {'srl_no': 3, 'tn': 265, 'meter': 120.0}, {'srl_no': 4, 'tn': 270, 'meter': 120.0}, {'srl_no': 5, 'tn': 272, 'meter': 120.0}, {'srl_no': 6, 'tn': 274, 'meter': 120.0}, {'srl_no': 7, 'tn': 275, 'meter': 120.0}, {'srl_no': 8, 'tn': 277, 'meter': 120.0}, {'srl_no': 9, 'tn': 268, 'meter': 120.0}, {'srl_no': 10, 'tn': 273, 'meter': 116.5}, {'srl_no': 11, 'tn': 266, 'meter': 108.0}, {'srl_no': 12, 'tn': 279, 'meter': 108.0}, {'srl_no': 13, 'tn': 276, 'meter': 105.0}, {'srl_no': 14, 'tn': 257, 'meter': 99.0}, {'srl_no': 15, 'tn': 278, 'meter': 93.5}, {'srl_no': 16, 'tn': 271, 'meter': 87.5}]
+--------------------------------------------------------------------------------
+FILE: SHREEJITEX54.jpeg
+count: 1
+challan_1:
+challan_no: 54
+date: 03/04/2026
+quality: DONIER TWILL
+meter: 1082.0
+taka: 12
+party_obj: {'name': 'SHREEJI TEXTILES', 'address': '', 'gstin_no': '24AKGPB2994N1ZV', 'pan_no': ''}
+weaver_obj: {'name': 'DHARMIL TEXTILES', 'address': '', 'gstin_no': '24BRSPK6565J1Z4', 'pan_no': ''}
+firm_obj: {'name': 'JAI MATA DI FASHIONS PVT. LTD.', 'address': '', 'gstin_no': '24AABCA9842L1ZG', 'pan_no': ''}
+remark: Received Above Goods In Good Condition & Order. NO DYEING GUARANTEE
+table_len: 12
+table: [{'srl_no': 1, 'tn': 462, 'meter': 86.0}, {'srl_no': 2, 'tn': 20882, 'meter': 100.0}, {'srl_no': 3, 'tn': 555, 'meter': 100.0}, {'srl_no': 4, 'tn': 563, 'meter': 80.0}, {'srl_no': 5, 'tn': 509, 'meter': 77.0}, {'srl_no': 6, 'tn': 600, 'meter': 82.0}, {'srl_no': 7, 'tn': 613, 'meter': 80.0}, {'srl_no': 8, 'tn': 564, 'meter': 80.0}, {'srl_no': 9, 'tn': 570, 'meter': 100.0}, {'srl_no': 10, 'tn': 338, 'meter': 100.0}, {'srl_no': 11, 'tn': 481, 'meter': 97.0}, {'srl_no': 12, 'tn': 541, 'meter': 100.0}]
+--------------------------------------------------------------------------------
+FILE: VIKASSM.jpeg
+count: 1
+challan_1:
+challan_no: 60
+date: 16/04/26
+quality: Grey Shity G.W.H
+meter: 1149.1
+taka: 30
+party_obj: {'name': 'Vikash Silk mills', 'address': '', 'gstin_no': '', 'pan_no': ''}
+weaver_obj: {'name': 'ANSHIKA TEXTILES', 'address': '', 'gstin_no': '27AAJHA9374G1ZO', 'pan_no': ''}
+firm_obj: {'name': 'JAI MATA DI FASHIONS PVT. LTD.', 'address': '', 'gstin_no': '27AAJHA9374G1ZO', 'pan_no': ''}
+remark: NILL SHORTAGE
+table_len: 10
+table: [{'srl_no': 1, 'tn': 11, 'meter': 117.2}, {'srl_no': 2, 'tn': 12, 'meter': 118.0}, {'srl_no': 3, 'tn': 13, 'meter': 115.2}, {'srl_no': 4, 'tn': 14, 'meter': 118.0}, {'srl_no': 5, 'tn': 15, 'meter': 112.5}, {'srl_no': 6, 'tn': 16, 'meter': 117.2}, {'srl_no': 7, 'tn': 17, 'meter': 110.0}, {'srl_no': 8, 'tn': 18, 'meter': 115.0}, {'srl_no': 9, 'tn': 19, 'meter': 118.0}, {'srl_no': 10, 'tn': 20, 'meter': 108.0}]
+--------------------------------------------------------------------------------
+FILE: VRAJSHOP (1).jpeg
+count: 1
+challan_1:
+challan_no: 8
+date: 08/04/2026
+quality: HK323
+meter: 1611.0
+taka: 14
+party_obj: {'name': 'VRAJ SHOPEE', 'address': '', 'gstin_no': '24AHIPG4870B1ZP', 'pan_no': ''}
+weaver_obj: {'name': 'H.K.POLY FAB', 'address': '', 'gstin_no': '24AAJFH5123L1ZD', 'pan_no': ''}
+firm_obj: {'name': 'JAI MATA DI FASHIONS PVT. LTD.', 'address': '', 'gstin_no': '24AABCA9B42L1ZG', 'pan_no': ''}
+remark: 
+table_len: 14
+table: [{'srl_no': 1, 'tn': 188, 'meter': 120.0}, {'srl_no': 2, 'tn': 189, 'meter': 133.0}, {'srl_no': 3, 'tn': 190, 'meter': 100.0}, {'srl_no': 4, 'tn': 235, 'meter': 120.0}, {'srl_no': 5, 'tn': 154, 'meter': 110.0}, {'srl_no': 6, 'tn': 191, 'meter': 96.0}, {'srl_no': 7, 'tn': 119, 'meter': 98.0}, {'srl_no': 8, 'tn': 155, 'meter': 120.0}, {'srl_no': 9, 'tn': 118, 'meter': 120.0}, {'srl_no': 10, 'tn': 156, 'meter': 110.0}, {'srl_no': 11, 'tn': 60, 'meter': 133.0}, {'srl_no': 12, 'tn': 63, 'meter': 110.0}, {'srl_no': 13, 'tn': 61, 'meter': 120.0}, {'srl_no': 14, 'tn': 23, 'meter': 121.0}]
+--------------------------------------------------------------------------------
+FILE: VRAJSHOP.jpeg
+count: 1
+challan_1:
+challan_no: 8
+date: 08/04/2026
+quality: HK323
+meter: 1611.0
+taka: 14
+party_obj: {'name': 'VRAJ SHOPEE', 'address': '', 'gstin_no': '24AHIPG4870B1ZP', 'pan_no': ''}
+weaver_obj: {'name': 'H.K.POLY FAB', 'address': '', 'gstin_no': '24AAJFH5123L1ZD', 'pan_no': ''}
+firm_obj: {'name': 'JAI MATA DI FASHIONS PVT. LTD.', 'address': '', 'gstin_no': '24AABCA9B42L1ZG', 'pan_no': ''}
+remark: 
+table_len: 14
+table: [{'srl_no': 1, 'tn': 188, 'meter': 120.0}, {'srl_no': 2, 'tn': 189, 'meter': 133.0}, {'srl_no': 3, 'tn': 190, 'meter': 100.0}, {'srl_no': 4, 'tn': 235, 'meter': 120.0}, {'srl_no': 5, 'tn': 154, 'meter': 110.0}, {'srl_no': 6, 'tn': 191, 'meter': 96.0}, {'srl_no': 7, 'tn': 119, 'meter': 98.0}, {'srl_no': 8, 'tn': 155, 'meter': 120.0}, {'srl_no': 9, 'tn': 118, 'meter': 120.0}, {'srl_no': 10, 'tn': 156, 'meter': 110.0}, {'srl_no': 11, 'tn': 60, 'meter': 133.0}, {'srl_no': 12, 'tn': 63, 'meter': 110.0}, {'srl_no': 13, 'tn': 61, 'meter': 120.0}, {'srl_no': 14, 'tn': 23, 'meter': 121.0}]
+--------------------------------------------------------------------------------
